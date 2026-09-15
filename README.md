@@ -1,51 +1,51 @@
 # Yocto Docker Builder
 
-Questo progetto crea un container Docker con Yocto/OpenEmbedded gia configurato
-per generare una immagine firmware di esempio.
+This project creates a Docker container with Yocto/OpenEmbedded already
+configured to generate a sample firmware image.
 
-Importante: `docker build` crea solo l'immagine Docker del builder. Il firmware
-vero e proprio viene creato dopo, entrando nel container e lanciando `bitbake`.
+Important: `docker build` only creates the Docker builder image. The actual
+firmware is created later, by entering the container and running `bitbake`.
 
-## Requisiti
+## Requirements
 
-- Docker installato e avviato
-- Connessione internet per scaricare i sorgenti durante la build Yocto
-- Molto spazio libero su disco. Una build Yocto puo usare decine di GB.
+- Docker installed and running
+- Internet connection to download sources during the Yocto build
+- Plenty of free disk space. A Yocto build can use tens of GB.
 
-## 1. Costruire l'immagine Docker
+## 1. Build the Docker image
 
-Dalla cartella di questo progetto:
+From this project directory:
 
 ```bash
 docker build -t yocto-builder:6.0.3 .
 ```
 
-Il nome dell'immagine Docker creata sara:
+The Docker image name will be:
 
 ```text
 yocto-builder:6.0.3
 ```
 
-## 2. Entrare nel container
+## 2. Enter the container
 
-Creare un container con nome fisso, cosi poi e facile copiare fuori i file
-generati:
+Create a container with a fixed name, so it is easy to copy the generated files
+out later:
 
 ```bash
 docker run -it --name yocto-build yocto-builder:6.0.3
 ```
 
-Se il container `yocto-build` esiste gia, rimuoverlo prima:
+If the `yocto-build` container already exists, remove it first:
 
 ```bash
 docker rm yocto-build
 ```
 
-Poi rilanciare il comando `docker run`.
+Then run the `docker run` command again.
 
-## 3. Generare il firmware
+## 3. Generate the firmware
 
-Dentro al container:
+Inside the container:
 
 ```bash
 cd /workdir/yocto-firmware
@@ -53,89 +53,89 @@ source layers/openembedded-core/oe-init-build-env build
 bitbake core-image-minimal
 ```
 
-La build puo richiedere parecchio tempo.
+The build can take a long time.
 
-## 4. Dove si trova il firmware
+## 4. Firmware output location
 
-Dopo una build riuscita, i file generati sono qui, dentro al container:
+After a successful build, the generated files are here inside the container:
 
 ```text
 /workdir/yocto-firmware/build/tmp/deploy/images/qemux86-64/
 ```
 
-Con la configurazione attuale:
+With the current configuration:
 
-- target Yocto: `core-image-minimal`
-- macchina Yocto: `qemux86-64`
-- formati prodotti: `tar.zst` ed `ext4.zst`
+- Yocto target: `core-image-minimal`
+- Yocto machine: `qemux86-64`
+- Generated formats: `tar.zst` and `ext4.zst`
 
-Il file principale del firmware si chiama:
+The main firmware file is named:
 
 ```text
 core-image-minimal-qemux86-64.rootfs.ext4.zst
 ```
 
-Yocto crea anche un file con timestamp, per esempio:
+Yocto also creates a timestamped file, for example:
 
 ```text
 core-image-minimal-qemux86-64.rootfs-YYYYMMDDHHMMSS.ext4.zst
 ```
 
-Il file senza timestamp e normalmente un link al file piu recente.
+The file without the timestamp is usually a symlink to the latest build.
 
-Viene generato anche l'archivio della root filesystem:
+The root filesystem archive is also generated:
 
 ```text
 core-image-minimal-qemux86-64.rootfs.tar.zst
 ```
 
-Nota: con questa configurazione il firmware non si chiama `.img`. Il formato
-principale e una root filesystem `ext4` compressa con `zstd`, quindi finisce in
+Note: with this configuration, the firmware is not named `.img`. The main
+format is an `ext4` root filesystem compressed with `zstd`, so the file ends in
 `.ext4.zst`.
 
-Per ottenere il file `.ext4` non compresso:
+To get the uncompressed `.ext4` file:
 
 ```bash
 cd /workdir/yocto-firmware/build/tmp/deploy/images/qemux86-64
 zstd -d core-image-minimal-qemux86-64.rootfs.ext4.zst
 ```
 
-Il risultato sara:
+The result will be:
 
 ```text
 core-image-minimal-qemux86-64.rootfs.ext4
 ```
 
-## 5. Copiare il firmware sul computer host
+## 5. Copy the firmware to the host machine
 
-Uscire dal container:
+Exit the container:
 
 ```bash
 exit
 ```
 
-Poi, dalla cartella del progetto sul computer host:
+Then, from the project directory on the host machine:
 
 ```bash
 mkdir -p deploy-images
 docker cp yocto-build:/workdir/yocto-firmware/build/tmp/deploy/images/qemux86-64 ./deploy-images
 ```
 
-A questo punto i file saranno disponibili in:
+The files will then be available at:
 
 ```text
 ./deploy-images/qemux86-64/
 ```
 
-## 6. Riprendere una build gia iniziata
+## 6. Resume an existing build
 
-Se il container esiste ancora:
+If the container still exists:
 
 ```bash
 docker start -ai yocto-build
 ```
 
-Poi dentro al container:
+Then, inside the container:
 
 ```bash
 cd /workdir/yocto-firmware
@@ -143,15 +143,15 @@ source layers/openembedded-core/oe-init-build-env build
 bitbake core-image-minimal
 ```
 
-## 7. Pulizia
+## 7. Cleanup
 
-Per eliminare il container:
+To remove the container:
 
 ```bash
 docker rm yocto-build
 ```
 
-Per eliminare anche l'immagine Docker:
+To also remove the Docker image:
 
 ```bash
 docker rmi yocto-builder:6.0.3
