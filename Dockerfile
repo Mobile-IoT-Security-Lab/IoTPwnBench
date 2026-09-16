@@ -61,9 +61,21 @@ RUN git clone -b yocto-6.0.3 \
     https://git.yoctoproject.org/meta-yocto \
     layers/meta-yocto
 
+# meta-oe contains the PHP recipe. Pin the revision used with Yocto 6.0.3 so
+# rebuilding the builder image remains deterministic.
+ARG META_OPENEMBEDDED_REV=14282a02be9c74a1276a7cda7d6c89e054699a11
+RUN git clone -b wrynose \
+    https://git.openembedded.org/meta-openembedded \
+    layers/meta-openembedded && \
+    git -C layers/meta-openembedded checkout "${META_OPENEMBEDDED_REV}"
+
+COPY --chown=yocto:yocto meta-router-dashboard layers/meta-router-dashboard
+
 RUN mkdir build
 
-RUN bash -lc "source layers/openembedded-core/oe-init-build-env build"
+RUN bash -lc "source layers/openembedded-core/oe-init-build-env build && \
+    bitbake-layers add-layer ../layers/meta-openembedded/meta-oe && \
+    bitbake-layers add-layer ../layers/meta-router-dashboard"
 
 
 CMD ["/bin/bash"]

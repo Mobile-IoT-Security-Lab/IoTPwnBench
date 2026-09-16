@@ -1,0 +1,22 @@
+services:
+  yocto:
+    build:
+      context: .
+    image: yocto-builder:6.0.3
+    container_name: yocto
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash", "/project-scripts/container-build-and-export.sh"]
+    volumes:
+      - yocto-volume:/workdir
+      # Il layer viene letto direttamente dalla repository locale.
+      - ./meta-router-dashboard:/workdir/yocto-firmware/layers/meta-router-dashboard:ro
+      # Gli artefatti necessari a QEMU vengono esportati sul computer host.
+      - ./deploy-images:/export
+      # Script di build eseguiti dal container, senza includere QEMU.
+      - ./scripts:/project-scripts:ro
+
+volumes:
+  yocto-volume:
+    name: yocto-volume
+    external: true
