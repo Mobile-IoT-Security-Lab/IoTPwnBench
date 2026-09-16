@@ -32,6 +32,24 @@ meta-router-dashboard/
 La build usa inoltre `meta-openembedded/meta-oe`, fissato alla revisione
 compatibile con la serie `wrynose`, per la ricetta PHP.
 
+## Preparazione automatica nel Dockerfile
+
+Durante `docker compose build`, il `Dockerfile` esegue automaticamente:
+
+1. creazione di `/workdir/yocto-firmware/layers`;
+2. clone di BitBake, OpenEmbedded Core e `meta-yocto` dalla branch
+   `yocto-6.0.3`;
+3. creazione della directory `build` tramite `oe-init-build-env`;
+4. configurazione di `MACHINE` in `build/conf/local.conf` usando il build arg
+   `YOCTO_MACHINE`;
+5. build di `core-image-minimal`;
+6. registrazione dei layer PHP e dashboard.
+
+Lo script avviato da Compose verifica nuovamente `MACHINE` e lancia prima
+`core-image-minimal`, poi `router-dashboard-image`. Questo secondo controllo è
+necessario perché il volume persistente `yocto-volume` può contenere una build
+creata da una versione precedente del builder.
+
 ## Build ed esportazione tramite Docker Compose
 
 Il Compose usa tre mapping oltre al volume persistente di Yocto:
@@ -42,13 +60,23 @@ Il Compose usa tre mapping oltre al volume persistente di Yocto:
 ./scripts               -> /project-scripts (sola lettura)
 ```
 
-Avviando il servizio, il container compila automaticamente il firmware e
-scrive gli artefatti necessari a QEMU direttamente nella repository locale:
+L'architettura Yocto viene impostata da CLI tramite `YOCTO_MACHINE`. Compose
+passa lo stesso valore sia al build arg del `Dockerfile`, sia allo script
+eseguito dal container. `qemuarm64` rimane il valore predefinito:
 
 ```bash
-docker compose up -d --build
+YOCTO_MACHINE=qemuarm64 docker compose up -d --build
 docker compose logs -f yocto
 ```
+
+La forma esplicita per costruire soltanto l'immagine builder è:
+
+```bash
+docker compose build --build-arg YOCTO_MACHINE=qemuarm64 yocto
+```
+
+Il primo comando compila automaticamente il firmware e scrive gli artefatti
+necessari a QEMU direttamente nella repository locale.
 
 Quando nei log compare `Firmware pronto`, l'immagine si trova in
 `deploy-images/qemuarm64/`. QEMU non è installato né eseguito nel container.
@@ -166,7 +194,7 @@ Il container non pubblica porte e non esegue QEMU. Per avviarlo conservando il
 volume nominato e facendo partire automaticamente build ed esportazione:
 
 ```bash
-docker compose up -d --build
+YOCTO_MACHINE=qemuarm64 docker compose up -d --build
 ```
 
 Se esiste già un container `yocto` creato senza Compose, Docker richiede prima
@@ -179,7 +207,7 @@ che la build venga rimossa insieme al container.
 Per creare l'immagine builder da questa repository e generare il firmware:
 
 ```bash
-docker compose up -d --build
+YOCTO_MACHINE=qemuarm64 docker compose up -d --build
 docker compose logs -f yocto
 ```
 

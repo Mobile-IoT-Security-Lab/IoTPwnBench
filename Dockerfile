@@ -73,7 +73,14 @@ COPY --chown=yocto:yocto meta-router-dashboard layers/meta-router-dashboard
 
 RUN mkdir build
 
-RUN bash -lc "source layers/openembedded-core/oe-init-build-env build && \
+ARG YOCTO_MACHINE=qemuarm64
+RUN case "${YOCTO_MACHINE}" in \
+        ''|*[!A-Za-z0-9._+-]*) echo "YOCTO_MACHINE non valido: ${YOCTO_MACHINE}" >&2; exit 1 ;; \
+    esac && \
+    bash -lc "source layers/openembedded-core/oe-init-build-env build && \
+    sed -i '/^[[:space:]]*MACHINE[[:space:]]*=/d' conf/local.conf && \
+    printf '\nMACHINE = \"${YOCTO_MACHINE}\"\n' >> conf/local.conf && \
+    bitbake core-image-minimal && \
     bitbake-layers add-layer ../layers/meta-openembedded/meta-oe && \
     bitbake-layers add-layer ../layers/meta-router-dashboard"
 

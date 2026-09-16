@@ -2,10 +2,14 @@ services:
   yocto:
     build:
       context: .
+      args:
+        YOCTO_MACHINE: ${YOCTO_MACHINE:-qemuarm64}
     image: yocto-builder:6.0.3
     container_name: yocto
     stdin_open: true
     tty: true
+    environment:
+      YOCTO_MACHINE: ${YOCTO_MACHINE:-qemuarm64}
     command: ["/bin/bash", "/project-scripts/container-build-and-export.sh"]
     volumes:
       - yocto-volume:/workdir

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-MACHINE="qemuarm64"
+MACHINE="${YOCTO_MACHINE:-qemuarm64}"
 IMAGE_NAME="router-dashboard-image"
 QEMU_HTTP_PORT="${QEMU_HTTP_PORT:-8080}"
 QEMU_BIN="${QEMU_BIN:-qemu-system-aarch64}"
@@ -14,6 +14,11 @@ ROOTFS_ZST="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4.zst"
 ROOTFS_IMAGE="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4"
 ROOTFS_REFRESH="${DEPLOY_DIR}/.${IMAGE_NAME}-${MACHINE}.rootfs.refresh"
 KERNEL_IMAGE="${DEPLOY_DIR}/Image"
+
+if [ "${MACHINE}" != "qemuarm64" ]; then
+    echo "run-qemu.sh supporta qemuarm64; valore ricevuto: ${MACHINE}" >&2
+    exit 1
+fi
 
 case "${QEMU_HTTP_PORT}" in
     ''|*[!0-9]*) echo "QEMU_HTTP_PORT deve essere una porta numerica." >&2; exit 1 ;;
