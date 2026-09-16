@@ -30,9 +30,9 @@ docker cp "${CONTAINER_NAME}:${KERNEL_SOURCE}" "${DEST_DIR}/Image"
 docker cp "${CONTAINER_NAME}:${QEMUBOOT_SOURCE}" "${DEST_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.qemuboot.conf"
 docker cp "${CONTAINER_NAME}:${MANIFEST_SOURCE}" "${DEST_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.manifest"
 
-# Force the next local run to decompress the newly exported firmware. This
-# avoids accidentally booting an older writable ext4 image.
-rm -f "${DEST_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4"
+# Non rimuovere l'ext4 locale: QEMU potrebbe averlo aperto. run-qemu.sh lo
+# rigenera dal nuovo file compresso al successivo avvio usando questo marker.
+touch "${DEST_DIR}/.${IMAGE_NAME}-${MACHINE}.rootfs.refresh"
 
 if command -v shasum >/dev/null 2>&1; then
     (

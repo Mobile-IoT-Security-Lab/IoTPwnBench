@@ -146,6 +146,20 @@ esportazione della build sostituisce il firmware locale.
 
 Per chiudere QEMU nella console seriale: `Ctrl-A`, poi `X`.
 
+## Accesso alla shell del firmware
+
+La console seriale QEMU usa queste credenziali di sviluppo:
+
+```text
+login: root
+password: routeradmin
+```
+
+`routerweb` è esclusivamente l'account di servizio della dashboard e non può
+effettuare il login. L'utente `yocto` appartiene invece al container builder e
+non esiste nel firmware. Cambiare la password prima di usare l'immagine fuori
+da un ambiente locale di sviluppo.
+
 ## Container builder
 
 Il container non pubblica porte e non esegue QEMU. Per avviarlo conservando il

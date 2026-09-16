@@ -12,6 +12,7 @@ PROJECT_DIR=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 DEPLOY_DIR="${PROJECT_DIR}/deploy-images/${MACHINE}"
 ROOTFS_ZST="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4.zst"
 ROOTFS_IMAGE="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4"
+ROOTFS_REFRESH="${DEPLOY_DIR}/.${IMAGE_NAME}-${MACHINE}.rootfs.refresh"
 KERNEL_IMAGE="${DEPLOY_DIR}/Image"
 
 case "${QEMU_HTTP_PORT}" in
@@ -31,9 +32,15 @@ if [ ! -f "${ROOTFS_ZST}" ] || [ ! -f "${KERNEL_IMAGE}" ]; then
     exit 1
 fi
 
-if [ ! -f "${ROOTFS_IMAGE}" ] || [ "${ROOTFS_ZST}" -nt "${ROOTFS_IMAGE}" ]; then
+if command -v pgrep >/dev/null 2>&1 && pgrep -f 'qemu-system-aarch64' >/dev/null 2>&1; then
+    echo "QEMU ARM64 è già in esecuzione. Chiudi prima la sessione corrente con Ctrl-A, poi X." >&2
+    exit 1
+fi
+
+if [ -f "${ROOTFS_REFRESH}" ] || [ ! -f "${ROOTFS_IMAGE}" ] || [ "${ROOTFS_ZST}" -nt "${ROOTFS_IMAGE}" ]; then
     echo "Decompressione del root filesystem..."
     zstd -f -d "${ROOTFS_ZST}" -o "${ROOTFS_IMAGE}"
+    rm -f "${ROOTFS_REFRESH}"
 fi
 
 echo "Avvio QEMU locale (${QEMU_ACCEL}, CPU ${QEMU_CPU})"

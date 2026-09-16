@@ -57,8 +57,9 @@ copy_artifact "Image" "Image"
 copy_artifact "${IMAGE_NAME}-${MACHINE}.rootfs.qemuboot.conf" "${IMAGE_NAME}-${MACHINE}.rootfs.qemuboot.conf"
 copy_artifact "${IMAGE_NAME}-${MACHINE}.rootfs.manifest" "${IMAGE_NAME}-${MACHINE}.rootfs.manifest"
 
-# Il prossimo avvio locale deve decomprimere il firmware appena esportato.
-rm -f "${EXPORT_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4"
+# Non rimuovere l'ext4 locale: QEMU potrebbe averlo aperto. run-qemu.sh lo
+# rigenera dal nuovo file compresso al successivo avvio usando questo marker.
+touch "${EXPORT_DIR}/.${IMAGE_NAME}-${MACHINE}.rootfs.refresh"
 
 (
     cd "${EXPORT_DIR}"

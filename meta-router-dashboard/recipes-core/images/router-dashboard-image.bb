@@ -11,7 +11,13 @@ IMAGE_INSTALL = "packagegroup-core-boot \
 
 IMAGE_LINGUAS = " "
 
-inherit core-image
+inherit core-image extrausers
+
+# Credenziali della console seriale per questa immagine dimostrativa.
+# La password in chiaro non viene inserita nel filesystem: qui è presente
+# soltanto il relativo hash SHA-512 crypt.
+ROOT_PASSWORD_HASH = "\$6\$yoctorouter\$3Bf/vJsZadvtkzaq9UWC2Vl9Ua/xfjnfn9NhnpJaPWdF3B4nVmWsVz4SwtVQasmtiY45f7aU0UWvPWBcrrrau."
+EXTRA_USERS_PARAMS = "usermod -p '${ROOT_PASSWORD_HASH}' root;"
 
 # Leave enough room for PHP and for settings written by the dashboard.
 IMAGE_ROOTFS_SIZE = "131072"
