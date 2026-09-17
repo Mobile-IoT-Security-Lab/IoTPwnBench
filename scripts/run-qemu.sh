@@ -1,67 +1,33 @@
 #!/bin/sh
+# Boot the exported qemuarm64 firmware with QEMU on the host.
+# Requires qemu-system-aarch64 and zstd.
+#   QEMU_HTTP_PORT  host port forwarded to guest port 80 (default: 8080)
+#   QEMU_ACCEL      tcg (default), or hvf on Apple Silicon together with QEMU_CPU=host
+#   QEMU_CPU        emulated CPU (default: cortex-a57)
 set -eu
 
-MACHINE="${YOCTO_MACHINE:-qemuarm64}"
-IMAGE_NAME="router-dashboard-image"
-QEMU_HTTP_PORT="${QEMU_HTTP_PORT:-8080}"
-QEMU_BIN="${QEMU_BIN:-qemu-system-aarch64}"
-QEMU_ACCEL="${QEMU_ACCEL:-tcg}"
-QEMU_CPU="${QEMU_CPU:-cortex-a57}"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_DIR=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
-DEPLOY_DIR="${PROJECT_DIR}/deploy-images/${MACHINE}"
-ROOTFS_ZST="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4.zst"
-ROOTFS_IMAGE="${DEPLOY_DIR}/${IMAGE_NAME}-${MACHINE}.rootfs.ext4"
-ROOTFS_REFRESH="${DEPLOY_DIR}/.${IMAGE_NAME}-${MACHINE}.rootfs.refresh"
-KERNEL_IMAGE="${DEPLOY_DIR}/Image"
+DEPLOY_DIR="$(dirname -- "$0")/../deploy-images/qemuarm64"
+ROOTFS="${DEPLOY_DIR}/router-dashboard-image-qemuarm64.rootfs.ext4"
+HTTP_PORT="${QEMU_HTTP_PORT:-8080}"
 
-if [ "${MACHINE}" != "qemuarm64" ]; then
-    echo "run-qemu.sh supporta qemuarm64; valore ricevuto: ${MACHINE}" >&2
-    exit 1
+# Decompress on first boot or after a new export. The ext4 image is not a
+# snapshot, so dashboard settings survive reboots until the next export.
+if [ ! -f "${ROOTFS}" ] || [ "${ROOTFS}.zst" -nt "${ROOTFS}" ]; then
+    zstd -f -d "${ROOTFS}.zst" -o "${ROOTFS}"
 fi
 
-case "${QEMU_HTTP_PORT}" in
-    ''|*[!0-9]*) echo "QEMU_HTTP_PORT deve essere una porta numerica." >&2; exit 1 ;;
-esac
+echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
 
-if ! command -v "${QEMU_BIN}" >/dev/null 2>&1; then
-    echo "${QEMU_BIN} non trovato. Installa QEMU sull'host locale." >&2
-    exit 1
-fi
-if ! command -v zstd >/dev/null 2>&1; then
-    echo "zstd non trovato. Installalo sull'host locale." >&2
-    exit 1
-fi
-if [ ! -f "${ROOTFS_ZST}" ] || [ ! -f "${KERNEL_IMAGE}" ]; then
-    echo "Firmware non esportato. Esegui prima ./scripts/export-firmware.sh." >&2
-    exit 1
-fi
-
-if command -v pgrep >/dev/null 2>&1 && pgrep -f 'qemu-system-aarch64' >/dev/null 2>&1; then
-    echo "QEMU ARM64 è già in esecuzione. Chiudi prima la sessione corrente con Ctrl-A, poi X." >&2
-    exit 1
-fi
-
-if [ -f "${ROOTFS_REFRESH}" ] || [ ! -f "${ROOTFS_IMAGE}" ] || [ "${ROOTFS_ZST}" -nt "${ROOTFS_IMAGE}" ]; then
-    echo "Decompressione del root filesystem..."
-    zstd -f -d "${ROOTFS_ZST}" -o "${ROOTFS_IMAGE}"
-    rm -f "${ROOTFS_REFRESH}"
-fi
-
-echo "Avvio QEMU locale (${QEMU_ACCEL}, CPU ${QEMU_CPU})"
-echo "Dashboard: http://127.0.0.1:${QEMU_HTTP_PORT} (guest port 80)"
-echo "Per uscire: Ctrl-A, poi X"
-
-exec "${QEMU_BIN}" \
-    -machine "virt,accel=${QEMU_ACCEL}" \
-    -cpu "${QEMU_CPU}" \
+exec qemu-system-aarch64 \
+    -machine "virt,accel=${QEMU_ACCEL:-tcg}" \
+    -cpu "${QEMU_CPU:-cortex-a57}" \
     -smp 4 \
     -m 256 \
-    -kernel "${KERNEL_IMAGE}" \
+    -kernel "${DEPLOY_DIR}/Image" \
     -append "root=/dev/vda rw mem=256M ip=dhcp console=ttyAMA0 swiotlb=0" \
-    -drive "id=disk0,file=${ROOTFS_IMAGE},if=none,format=raw" \
+    -drive "id=disk0,file=${ROOTFS},if=none,format=raw" \
     -device virtio-blk-pci,drive=disk0 \
-    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${QEMU_HTTP_PORT}-:80" \
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80" \
     -device virtio-net-pci,netdev=net0 \
     -object rng-random,filename=/dev/urandom,id=rng0 \
     -device virtio-rng-pci,rng=rng0 \

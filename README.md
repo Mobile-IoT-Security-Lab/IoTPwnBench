@@ -1,215 +1,147 @@
 # Yocto Router Dashboard
 
-Firmware Yocto 6.0.3 per `qemuarm64` con una dashboard PHP che simula la
-gestione di un router. Lighttpd ascolta su tutte le interfacce del firmware,
-porta 80, e avvia PHP tramite CGI.
+Yocto 6.0.3 firmware for `qemuarm64` with a PHP dashboard that simulates router
+management. Lighttpd listens on port 80 on every interface of the firmware and
+runs PHP through CGI.
 
-La dashboard include:
+The dashboard includes:
 
-- panoramica con metriche reali lette da `/proc` e `/sys`;
-- traffico delle interfacce aggiornato in tempo reale;
-- gestione simulata dei client con pausa/ripristino;
-- impostazioni simulate Wi-Fi, rete ospiti, LAN e DHCP;
-- stato kernel, architettura, runtime PHP e interfacce;
-- layout responsive, senza CDN o dipendenze browser esterne.
+- an overview with real metrics read from `/proc` and `/sys`;
+- live interface traffic;
+- simulated client management with pause/resume;
+- simulated Wi-Fi, guest network, LAN and DHCP settings;
+- kernel, architecture, PHP runtime and interface status;
+- a responsive layout with no CDN or external browser dependencies.
 
-Le azioni effettuate dalla UI non cambiano la rete Linux. Lo stato dimostrativo
-viene salvato in `/var/lib/router-dashboard/settings.json`.
+Actions in the UI do not change the Linux network. The demo state is stored in
+`/var/lib/router-dashboard/settings.json`.
 
-## Struttura
-
-Il codice versionato è un layer OpenEmbedded completo:
+## Layout
 
 ```text
-meta-router-dashboard/
-├── conf/layer.conf
-├── recipes-core/images/router-dashboard-image.bb
-├── recipes-connectivity/router-dashboard/
-├── recipes-devtools/php/php_%.bbappend
-└── recipes-extended/lighttpd/lighttpd_%.bbappend
+builder/                  generic Yocto builder, copied into the image
+├── site.conf             cache locations (DL_DIR, SSTATE_DIR, hash equivalence)
+├── yocto-env.sh          sets up /workdir/build for YOCTO_MACHINE and YOCTO_LAYERS
+└── warm-cache.sh         fills the cache without exporting firmware
+meta-router-dashboard/    OpenEmbedded layer of the firmware
+scripts/
+├── container-build-and-export.sh   builds the image and exports it (run by Compose)
+└── run-qemu.sh                     boots the exported firmware on the host
 ```
 
-La build usa inoltre `meta-openembedded/meta-oe`, fissato alla revisione
-compatibile con la serie `wrynose`, per la ricetta PHP.
+The build also uses `meta-openembedded/meta-oe`, pinned to a revision compatible
+with the `wrynose` series, for the PHP recipe.
 
-## Preparazione automatica nel Dockerfile
+## Builder and cache
 
-Durante `docker compose build`, il `Dockerfile` esegue automaticamente:
+| Part | Location | Contents |
+| --- | --- | --- |
+| image `yocto-builder:6.0.3` | `/opt/yocto` | tools, BitBake and pinned layers |
+| volume `yocto-cache` | `/cache` | `downloads/`, `sstate-cache/`, `hashserv/` |
+| volume `yocto-build` | `/workdir` | build directory, safe to delete |
 
-1. creazione di `/workdir/yocto-firmware/layers`;
-2. clone di BitBake, OpenEmbedded Core e `meta-yocto` dalla branch
-   `yocto-6.0.3`;
-3. creazione della directory `build` tramite `oe-init-build-env`;
-4. configurazione di `MACHINE` in `build/conf/local.conf` usando il build arg
-   `YOCTO_MACHINE`;
-5. build di `core-image-minimal`;
-6. registrazione dei layer PHP e dashboard.
+The image contains no firmware layer and no build output, so it can be pushed to
+a registry. Project layers are mounted at runtime and enabled via `YOCTO_LAYERS`.
 
-Lo script avviato da Compose verifica nuovamente `MACHINE` e lancia prima
-`core-image-minimal`, poi `router-dashboard-image`. Questo secondo controllo è
-necessario perché il volume persistente `yocto-volume` può contenere una build
-creata da una versione precedente del builder.
+What the cache can reuse:
 
-## Build ed esportazione tramite Docker Compose
+- `downloads/`: sources, valid for any machine, image and host;
+- `sstate-cache/`: task outputs, reused by every image sharing those tasks.
+  `-native` tools depend on the host architecture (arm64 on Apple Silicon,
+  amd64 on most Windows PCs), target packages on the target CPU; only the kernel
+  and the image are machine specific.
 
-Il Compose usa tre mapping oltre al volume persistente di Yocto:
-
-```text
-./meta-router-dashboard -> /workdir/yocto-firmware/layers/meta-router-dashboard (sola lettura)
-./deploy-images         -> /export
-./scripts               -> /project-scripts (sola lettura)
-```
-
-L'architettura Yocto viene impostata da CLI tramite `YOCTO_MACHINE`. Compose
-passa lo stesso valore sia al build arg del `Dockerfile`, sia allo script
-eseguito dal container. `qemuarm64` rimane il valore predefinito:
+Fill the cache once with a common base (`core-image-minimal`) plus the sources
+of the dashboard image:
 
 ```bash
-YOCTO_MACHINE=qemuarm64 docker compose up -d --build
-docker compose logs -f yocto
+docker compose --profile warm run --rm warm-cache
 ```
 
-La forma esplicita per costruire soltanto l'immagine builder è:
+`WARM_MACHINES`, `WARM_TARGETS` and `WARM_FETCH_TARGETS` change what is
+prepared, e.g. `WARM_MACHINES="qemuarm64 qemux86-64"`.
+
+## Build the firmware
 
 ```bash
-docker compose build --build-arg YOCTO_MACHINE=qemuarm64 yocto
+YOCTO_MACHINE=qemuarm64 docker compose up --build yocto
 ```
 
-Il primo comando compila automaticamente il firmware e scrive gli artefatti
-necessari a QEMU direttamente nella repository locale.
+The container builds `router-dashboard-image`, reusing the cache, and copies the
+root filesystem and kernel to `deploy-images/qemuarm64/`. Run the same command
+again after changing the layer.
 
-Quando nei log compare `Firmware pronto`, l'immagine si trova in
-`deploy-images/qemuarm64/`. QEMU non è installato né eseguito nel container.
-Per ripetere build ed esportazione dopo una modifica:
+To start from a clean build directory while keeping the cache:
 
 ```bash
-docker compose restart yocto
-docker compose logs -f yocto
+docker compose down
+docker volume rm yocto-build
 ```
 
-## Build manuale nel container esistente
-
-Con il container `yocto` attivo e `yocto-volume` montato su `/workdir`:
+## Publish the builder image
 
 ```bash
-./scripts/sync-and-build.sh
+docker buildx build --platform linux/amd64,linux/arm64 \
+    -t <user>/yocto-builder:6.0.3 --push .
+YOCTO_BUILDER_IMAGE=<user>/yocto-builder docker compose up yocto
 ```
 
-Lo script copia il layer in
-`/workdir/yocto-firmware/layers/meta-router-dashboard`, registra i layer e
-compila:
+Keep the cache out of the image: it is many GB, partly host-architecture
+specific and would be duplicated on disk when copied into the volume.
 
-```text
-router-dashboard-image
-```
+## Performance notes
 
-Gli output QEMU sono generati in:
+- Docker Desktop: give it as many CPUs as possible, at least 16 GB of RAM and
+  150 GB of virtual disk.
+- Apple Silicon: use the native `linux/arm64` image, never
+  `--platform linux/amd64`.
+- Windows: use the WSL2 backend. `.gitattributes` enforces LF line endings,
+  required for scripts and recipes mounted into the container.
+- Keep the cache and build directory on Docker volumes, not on bind mounts.
 
-```text
-/workdir/yocto-firmware/build/tmp/deploy/images/qemuarm64/
-```
+## Run QEMU on the host
 
-I file principali sono l'immagine root filesystem `.ext4.zst`, il kernel
-`Image` e il file `.qemuboot.conf`. Sono binari ARM64 avviabili con QEMU.
-
-Al termine della build lo script li esporta automaticamente anche sull'host.
-La stessa cartella viene popolata direttamente dal servizio Compose:
-
-```text
-deploy-images/qemuarm64/
-├── Image
-├── router-dashboard-image-qemuarm64.rootfs.ext4.zst
-├── router-dashboard-image-qemuarm64.rootfs.qemuboot.conf
-├── router-dashboard-image-qemuarm64.rootfs.manifest
-└── SHA256SUMS
-```
-
-Per riesportare gli artefatti senza ricompilare:
-
-```bash
-./scripts/export-firmware.sh
-```
-
-## Avvio QEMU locale
-
-QEMU non viene eseguito nel container. Il container serve esclusivamente per
-la build Yocto; lo script seguente usa i file in `deploy-images/` e avvia
-`qemu-system-aarch64` direttamente sul computer host.
-
-Sono richiesti `qemu-system-aarch64` e `zstd`. Su macOS con Homebrew:
+QEMU is not part of the container. Install `qemu-system-aarch64` and `zstd`;
+on macOS with Homebrew:
 
 ```bash
 brew install qemu zstd
 ```
 
-Avvio:
+Boot the firmware:
 
 ```bash
 ./scripts/run-qemu.sh
 ```
 
-La dashboard sarà disponibile su:
-
-```text
-http://127.0.0.1:8080
-```
-
-Il firmware ascolta sempre sulla porta guest 80. La porta locale è configurata
-da QEMU e può essere cambiata, per esempio:
+The dashboard is available at <http://127.0.0.1:8080>. The firmware always
+listens on guest port 80; the host port can be changed:
 
 ```bash
 QEMU_HTTP_PORT=80 ./scripts/run-qemu.sh
 ```
 
-Su un Mac Apple Silicon si può richiedere l'accelerazione hardware:
+On Apple Silicon, hardware acceleration can be enabled:
 
 ```bash
 QEMU_ACCEL=hvf QEMU_CPU=host ./scripts/run-qemu.sh
 ```
 
-L'immagine `.ext4.zst` viene decompressa localmente al primo avvio. Il file
-`.ext4` risultante non usa la modalità snapshot, quindi le impostazioni della
-dashboard restano disponibili tra i successivi avvii locali. Una nuova
-esportazione della build sostituisce il firmware locale.
+The `.ext4.zst` image is decompressed on first boot and after each new export.
+The `.ext4` file is not a snapshot, so dashboard settings survive reboots until
+the next export.
 
-Per chiudere QEMU nella console seriale: `Ctrl-A`, poi `X`.
+To quit QEMU from the serial console: `Ctrl-A`, then `X`.
 
-## Accesso alla shell del firmware
+## Firmware shell access
 
-La console seriale QEMU usa queste credenziali di sviluppo:
+The QEMU serial console uses these development credentials:
 
 ```text
 login: root
 password: routeradmin
 ```
 
-`routerweb` è esclusivamente l'account di servizio della dashboard e non può
-effettuare il login. L'utente `yocto` appartiene invece al container builder e
-non esiste nel firmware. Cambiare la password prima di usare l'immagine fuori
-da un ambiente locale di sviluppo.
-
-## Container builder
-
-Il container non pubblica porte e non esegue QEMU. Per avviarlo conservando il
-volume nominato e facendo partire automaticamente build ed esportazione:
-
-```bash
-YOCTO_MACHINE=qemuarm64 docker compose up -d --build
-```
-
-Se esiste già un container `yocto` creato senza Compose, Docker richiede prima
-che venga fermato e rimosso. La rimozione del container non elimina
-`yocto-volume`; il volume è dichiarato `external` anche in Compose per evitare
-che la build venga rimossa insieme al container.
-
-## Build pulita del builder
-
-Per creare l'immagine builder da questa repository e generare il firmware:
-
-```bash
-YOCTO_MACHINE=qemuarm64 docker compose up -d --build
-docker compose logs -f yocto
-```
-
-Il volume nominato rende persistenti download, cache sstate e artefatti tra le
-esecuzioni.
+`routerweb` is only the dashboard service account and cannot log in. The `yocto`
+user belongs to the builder container and does not exist in the firmware.
+Change the password before using the image outside a local development setup.

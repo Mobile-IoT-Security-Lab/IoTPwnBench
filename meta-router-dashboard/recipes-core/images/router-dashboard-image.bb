@@ -13,9 +13,9 @@ IMAGE_LINGUAS = " "
 
 inherit core-image extrausers
 
-# Credenziali della console seriale per questa immagine dimostrativa.
-# La password in chiaro non viene inserita nel filesystem: qui è presente
-# soltanto il relativo hash SHA-512 crypt.
+# Serial console credentials for this demo image.
+# The plain-text password never reaches the filesystem: only its SHA-512 crypt
+# hash is stored here.
 ROOT_PASSWORD_HASH = "\$6\$yoctorouter\$3Bf/vJsZadvtkzaq9UWC2Vl9Ua/xfjnfn9NhnpJaPWdF3B4nVmWsVz4SwtVQasmtiY45f7aU0UWvPWBcrrrau."
 EXTRA_USERS_PARAMS = "usermod -p '${ROOT_PASSWORD_HASH}' root;"
 
