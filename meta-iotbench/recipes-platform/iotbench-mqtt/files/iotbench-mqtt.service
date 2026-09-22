@@ -1,0 +1,12 @@
+[Unit]
+Description=IoTBench MQTT telemetry publisher
+After=mosquitto.service iotbench-sim.service
+Wants=mosquitto.service iotbench-sim.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/iotbench-mqtt-publish
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=IoTBench Modbus/TCP server
+After=iotbench-sim.service
+Wants=iotbench-sim.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/iotbench-modbusd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

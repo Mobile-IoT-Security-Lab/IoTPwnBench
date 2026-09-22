@@ -1,0 +1,13 @@
+[Unit]
+Description=IoTBench peripheral simulator
+After=local-fs.target
+
+[Service]
+Type=simple
+RuntimeDirectory=iotbench
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/iotbench-simd /etc/iotbench/peripherals.conf /run/iotbench/state.json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

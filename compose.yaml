@@ -3,18 +3,20 @@ x-builder: &builder
   image: ${YOCTO_BUILDER_IMAGE:-yocto-builder}:6.0.3
   environment: &builder-environment
     YOCTO_MACHINE: ${YOCTO_MACHINE:-qemuarm64}
-    YOCTO_LAYERS: openembedded-core/meta meta-openembedded/meta-oe meta-router-dashboard
+    YOCTO_LAYERS: openembedded-core/meta meta-openembedded/meta-oe meta-openembedded/meta-python meta-openembedded/meta-networking meta-iotbench
+    # Which firmware to build: matches recipes-images/iotbench-${FIRMWARE}.bb
+    FIRMWARE: ${FIRMWARE:-router-cwe078-os-command-injection}
   volumes:
     # Downloads, sstate and hash equivalence database: keep between builds.
     - yocto-cache:/cache
     # Build directory: safe to delete, everything reusable is in yocto-cache.
     - yocto-build:/workdir
-    - ./meta-router-dashboard:/opt/yocto/layers/meta-router-dashboard:ro
+    - ./meta-iotbench:/opt/yocto/layers/meta-iotbench:ro
     - ./scripts:/scripts:ro
     - ./deploy-images:/export
 
 services:
-  # Build the firmware and export it to ./deploy-images.
+  # Build the selected firmware and export it to ./deploy-images/<firmware>.
   yocto:
     <<: *builder
     command: ["bash", "/scripts/container-build-and-export.sh"]
@@ -27,7 +29,7 @@ services:
       <<: *builder-environment
       WARM_MACHINES: ${WARM_MACHINES:-}
       WARM_TARGETS: ${WARM_TARGETS:-core-image-minimal}
-      WARM_FETCH_TARGETS: ${WARM_FETCH_TARGETS:-router-dashboard-image}
+      WARM_FETCH_TARGETS: ${WARM_FETCH_TARGETS:-iotbench-router-cwe078-os-command-injection}
     command: ["bash", "/opt/yocto/warm-cache.sh"]
 
 volumes:
