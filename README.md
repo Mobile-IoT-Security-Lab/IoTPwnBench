@@ -90,6 +90,27 @@ Each firmware maps to `recipes-images/iotbench-<firmware id>.bb`. The catalog is
 the set of those recipes; the table above is a convenience copy. Every device
 carries a distinct simulated peripheral set (`recipes-devices/<device>/files/peripherals.conf`).
 
+Additional router scenarios from the Francesco catalog slice:
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `router-cwe276-leaked-private-key` | CWE-276 | Private key exposed under the web document root |
+| `router-cwe276-bad-chown-rights` | CWE-276 | Privileged configuration file owned by the web user |
+| `router-cwe798-ld-preload-sudo` | CWE-798 | Sudo rule preserving `LD_PRELOAD` for a root command |
+| `router-cwe798-vi-privilege-escalation` | CWE-798 | Passwordless sudo rule for a privileged editor |
+| `router-cwe078-writable-root-cron` | CWE-78 | Root cron entry executes a web-user-writable script |
+| `router-cwe287-ssh-hardcoded-backdoor` | CWE-287 | Hardcoded SSH support account |
+| `router-cwe089-http-sqli-auth` | CWE-89 | HTTP login SQL injection |
+| `router-cwe078-bash-command-injection` | CWE-78 | Bash diagnostic command injection |
+| `router-cwe077-c-command-injection` | CWE-77 | C helper command injection |
+| `router-cwe416-use-after-free` | CWE-416 | Freed authorization object reuse |
+| `router-cwe400-diagnostic-dos` | CWE-400 | Diagnostic resource exhaustion |
+| `router-cwe078-service-interface-injection` | CWE-78 | TCP service interface command injection |
+| `router-cwe022-path-traversal` | CWE-22 | Report viewer path traversal |
+
+Payloads and expected exploit signals for these scenarios are documented in
+[docs/francesco-payloads.md](docs/francesco-payloads.md).
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
@@ -217,6 +238,68 @@ Build every firmware in the catalog, optionally across architectures:
 ./scripts/build-all.sh
 MACHINES="qemuarm64 qemuarm qemux86-64 qemux86 qemumips" ./scripts/build-all.sh
 ```
+
+### Windows with WSL 2
+
+The supported Windows setup uses an Ubuntu WSL 2 distribution together with
+Docker Desktop. The Yocto build itself runs in Docker; WSL provides the Linux
+shell used to run the repository scripts.
+
+Install WSL 2 from an elevated PowerShell terminal, then restart Windows if
+requested:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+and configure it as follows:
+
+1. In **Settings > General**, enable **Use the WSL 2 based engine**.
+2. In **Settings > Resources > WSL Integration**, enable integration for the
+   Ubuntu distribution installed above.
+3. Allocate at least 16 GB of RAM and 150 GB of virtual disk space for Docker.
+
+Use Docker Desktop's engine; do not install a second Docker daemon inside the
+WSL distribution. Open Ubuntu and install the tools needed to clone and run the
+scripts:
+
+```bash
+sudo apt update
+sudo apt install -y git
+docker info
+docker compose version
+```
+
+For the best filesystem performance, clone the repository into the WSL Linux
+filesystem rather than under `/mnt/c`:
+
+```bash
+mkdir -p ~/src
+cd ~/src
+git clone <repository-url> IoTBench
+cd IoTBench
+chmod +x scripts/*.sh
+./scripts/build-all.sh
+```
+
+To build all supported architectures instead of the default `qemuarm64`:
+
+```bash
+MACHINES="qemuarm64 qemuarm qemux86-64 qemux86 qemumips" ./scripts/build-all.sh
+```
+
+Artifacts are written to `deploy-images/<firmware>/<machine>/`. If WSL reports
+`Cannot connect to the Docker daemon at unix:///var/run/docker.sock`, confirm
+that Docker Desktop is running and that WSL integration is enabled for the
+distribution. Then run the following in PowerShell and reopen Ubuntu:
+
+```powershell
+wsl --shutdown
+```
+
+QEMU is not required to build the images. Install it separately inside WSL only
+when you want to boot them; see [Run QEMU on the host](#run-qemu-on-the-host).
 
 To start from a clean build directory while keeping the cache:
 

@@ -1,0 +1,1 @@
+routerweb ALL=(root) NOPASSWD: /bin/busybox vi *

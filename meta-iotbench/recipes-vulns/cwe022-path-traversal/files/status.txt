@@ -1,0 +1,3 @@
+Router status report
+wan=online
+clients=5

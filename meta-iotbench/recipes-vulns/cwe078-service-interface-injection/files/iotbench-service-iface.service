@@ -1,0 +1,12 @@
+[Unit]
+Description=IoTBench vulnerable service interface
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/iotbench-service-iface
+Restart=always
+User=routerweb
+Group=routerweb
+
+[Install]
+WantedBy=multi-user.target

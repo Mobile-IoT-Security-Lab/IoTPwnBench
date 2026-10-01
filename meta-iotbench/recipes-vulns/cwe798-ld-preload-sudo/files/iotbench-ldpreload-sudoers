@@ -1,0 +1,2 @@
+Defaults:routerweb env_keep += "LD_PRELOAD"
+routerweb ALL=(root) NOPASSWD:SETENV: /usr/bin/ldpreload-target
