@@ -1,0 +1,10 @@
+#!/bin/sh
+# Deliberately publish maintenance data with permissive default permissions.
+set -eu
+umask 022
+mkdir -p /var/lib/ftp
+cp /etc/iotbench/device.conf /var/lib/ftp/device.conf
+cp /etc/iotbench/peripherals.conf /var/lib/ftp/peripherals.conf
+cp /var/lib/router-dashboard/settings.json /var/lib/ftp/settings.json
+chmod 0755 /var/lib/ftp
+chmod 0644 /var/lib/ftp/device.conf /var/lib/ftp/peripherals.conf /var/lib/ftp/settings.json

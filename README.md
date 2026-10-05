@@ -134,6 +134,103 @@ Payloads and expected exploit signals for these scenarios are documented in
 That guide also identifies the canonical attacker position for each image:
 remote HTTP, remote network service, or a local `routerweb` foothold.
 
+### Weak cipher: Triple DES (CWE-327)
+
+Every device also has a separate firmware that encrypts and decrypts device
+backup data with **3DES-CBC** through the shared web admin. The vulnerability
+package lives in `meta-iotbench/recipes-vulns/weak-cipher/` and installs the
+**Device Backup Encryption** panel plus the `iotbench-weak-cipher` CLI helper.
+Each image retains its device's native services and simulated peripherals.
+The 3DES key, IV and HMAC key are hardcoded and identical in all eleven images;
+the same plaintext produces the same encrypted frame. Their public hex values
+are documented in [docs/luca-payloads.md](docs/luca-payloads.md).
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `router-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `ipcamera-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `smartplug-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `thermostat-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `plc-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `smartbulb-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `smarthub-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `envsensor-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `smartspeaker-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `healthmonitor-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+| `doorlock-cwe327-weak-cipher` | CWE-327 | 3DES device backup encryption |
+
+Build and boot one device:
+
+```bash
+FIRMWARE=router-cwe327-weak-cipher docker compose run --rm yocto
+FIRMWARE=router-cwe327-weak-cipher ./scripts/run-qemu.sh
+```
+
+Build only the eleven weak-cipher images for the default `qemuarm64` machine
+(set `YOCTO_MACHINE` to build another supported architecture):
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe327-weak-cipher.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+The catalog-wide `scripts/build-all.sh` discovers these images automatically.
+Build artifacts are exported to `deploy-images/<firmware>/<machine>/`.
+See [docs/luca-payloads.md](docs/luca-payloads.md) for the frame format, API/CLI
+examples and verification procedure.
+
+### Allow anonymous login (CWE-276)
+
+All eleven devices have a separate FTP maintenance image with permissive
+default access. `vsftpd` accepts `anonymous` (or `ftp`) without a password and
+publishes a readable backup of the device identity, peripheral specification
+and dashboard settings. This models **CWE-276: Incorrect Default Permissions**:
+maintenance data that should be private is available to every network client.
+Each image installs only `cwe276-allow-anonymous-login` as its vulnerability
+package and retains the device's native services and simulated peripherals.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `envsensor-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `healthmonitor-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `ipcamera-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `plc-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `router-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `smartbulb-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `smarthub-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `smartplug-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `smartspeaker-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+| `thermostat-cwe276-allow-anonymous-login` | CWE-276 | Anonymous FTP maintenance backup access |
+
+Build, boot and verify one device:
+
+```bash
+FIRMWARE=router-cwe276-allow-anonymous-login docker compose run --rm yocto
+FIRMWARE=router-cwe276-allow-anonymous-login ./scripts/run-qemu.sh
+# Run in a second terminal while QEMU is running:
+python3 scripts/test-anonymous-login.py --device router
+```
+
+Build only the eleven anonymous-login images (default `qemuarm64`):
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe276-allow-anonymous-login.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+`YOCTO_MACHINE` selects another supported architecture. Artifacts land in
+`deploy-images/<device>-cwe276-allow-anonymous-login/<machine>/`; the existing
+`scripts/build-all.sh` discovers these recipes automatically. QEMU forwards
+FTP control to `127.0.0.1:2121` (`QEMU_FTP_PORT` overrides it) and passive data
+to `127.0.0.1:30000-30009`. Use passive FTP; all forwarded ports bind to
+loopback. See [docs/luca-payloads.md](docs/luca-payloads.md#allow-anonymous-login-cwe-276)
+for configuration, payloads, expected results, verification and remediation.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
@@ -382,6 +479,7 @@ them:
 | Scenario | Host endpoint | Override |
 | --- | --- | --- |
 | SSH hardcoded backdoor | `127.0.0.1:2222` -> guest `:22` | `QEMU_SSH_PORT` |
+| Anonymous FTP login | `127.0.0.1:2121` -> guest `:21`; passive `30000-30009` unchanged | `QEMU_FTP_PORT` (control only) |
 | TCP service injection | `127.0.0.1:9090` -> guest `:9090` | `QEMU_SERVICE_PORT` |
 | MQTT device profiles | `127.0.0.1:1883` -> guest `:1883` | `QEMU_MQTT_PORT` |
 | PLC profile | `127.0.0.1:1502` -> guest `:502` | `QEMU_MODBUS_PORT` |

@@ -5,6 +5,8 @@
 #   YOCTO_MACHINE   qemuarm64 (default) | qemuarm | qemux86-64 | qemux86 | qemumips
 #   QEMU_HTTP_PORT  host port forwarded to guest port 80 (default: 8080)
 #   QEMU_SSH_PORT   host port forwarded to guest port 22 for SSH scenarios (default: 2222)
+#   QEMU_FTP_PORT   host port forwarded to guest port 21 for anonymous FTP (default: 2121)
+#                   Passive data ports 30000-30009 are forwarded unchanged.
 #   QEMU_SERVICE_PORT host port forwarded to guest port 9090 (default: 9090)
 #   QEMU_MQTT_PORT  host port forwarded to guest port 1883 (default: 1883)
 #   QEMU_MODBUS_PORT host port forwarded to guest port 502 (default: 1502)
@@ -54,6 +56,22 @@ case "${FIRMWARE}" in
         MODBUS_PORT="${QEMU_MODBUS_PORT:-1502}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MODBUS_PORT}-:502"
         EXTRA_ENDPOINT="Modbus/TCP: 127.0.0.1:${MODBUS_PORT}"
+        ;;
+esac
+
+case "${FIRMWARE}" in
+    *-cwe276-allow-anonymous-login)
+        FTP_PORT="${QEMU_FTP_PORT:-2121}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${FTP_PORT}-:21"
+        for FTP_DATA_PORT in 30000 30001 30002 30003 30004 30005 30006 30007 30008 30009; do
+            NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${FTP_DATA_PORT}-:${FTP_DATA_PORT}"
+        done
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}${EXTRA_ENDPOINT:+; }FTP: ftp://127.0.0.1:${FTP_PORT} (anonymous; passive data: 30000-30009)"
+        ;;
+    *-cwe276-permit-root-login)
+        SSH_PORT="${QEMU_SSH_PORT:-2222}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}${EXTRA_ENDPOINT:+; }SSH: ssh -p ${SSH_PORT} root@127.0.0.1"
         ;;
 esac
 
