@@ -1,0 +1,38 @@
+#!/bin/sh
+# INTENTIONALLY VULNERABLE: the actor is parsed but never authorized for device.
+set -u
+
+REQUEST_TOPIC=iotbench/smartplug/control/set-relay
+RESULT_TOPIC=iotbench/smartplug/control-result
+mkdir -p /run/iotbench
+
+while :; do
+    mosquitto_sub -h 127.0.0.1 -p 1883 -v -t "$REQUEST_TOPIC" 2>/dev/null |
+    while IFS= read -r line; do
+        payload=${line#* }
+        device=""
+        actor=""
+        state=""
+        old_ifs=$IFS
+        IFS=';'
+        for field in $payload; do
+            case "$field" in
+                device=*) device=${field#device=} ;;
+                actor=*) actor=${field#actor=} ;;
+                state=*) state=${field#state=} ;;
+            esac
+        done
+        IFS=$old_ifs
+
+        if [ "$device" != "plug-lab-01" ] || { [ "$state" != "on" ] && [ "$state" != "off" ]; }; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected malformed request" || true
+            continue
+        fi
+
+        # CWE-862: no owner/role check is performed for actor before relay control.
+        printf '%s\n' "$state" > /run/iotbench/smartplug-relay-state
+        mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" \
+            -m "relay=${state} actor=${actor:-anonymous} authorization=skipped" || true
+    done
+    sleep 1
+done

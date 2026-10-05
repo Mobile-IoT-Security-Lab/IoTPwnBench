@@ -4,6 +4,13 @@
 #   FIRMWARE        firmware id under deploy-images/ (default: router-cwe078-os-command-injection)
 #   YOCTO_MACHINE   qemuarm64 (default) | qemuarm | qemux86-64 | qemux86 | qemumips
 #   QEMU_HTTP_PORT  host port forwarded to guest port 80 (default: 8080)
+#   QEMU_SSH_PORT   host port forwarded to guest port 22 for SSH scenarios (default: 2222)
+#   QEMU_SERVICE_PORT host port forwarded to guest port 9090 (default: 9090)
+#   QEMU_MQTT_PORT  host port forwarded to guest port 1883 (default: 1883)
+#   QEMU_MODBUS_PORT host port forwarded to guest port 502 (default: 1502)
+#   QEMU_ZCL_PORT   host port forwarded to the bulb bridge (default: 17754)
+#   QEMU_MEDIA_PORT host port forwarded to the speaker parser (default: 18000)
+#   QEMU_HEALTH_PORT host port forwarded to the patient protocol (default: 2575)
 #   QEMU_ACCEL      tcg (default), or kvm/hvf where host and guest arch match
 #   QEMU_CPU        override the emulated CPU
 #   QEMU_PERSIST    1 keeps guest writes in the .ext4 across boots (power off the
@@ -19,6 +26,54 @@ DEPLOY_DIR="$(dirname -- "$0")/../deploy-images/${FIRMWARE}/${MACHINE}"
 ROOTFS="${DEPLOY_DIR}/${IMAGE}-${MACHINE}.rootfs.ext4"
 HTTP_PORT="${QEMU_HTTP_PORT:-8080}"
 SMP=4
+NETDEV="user,id=net0,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80"
+EXTRA_ENDPOINT=""
+
+case "${FIRMWARE}" in
+    *-cwe287-ssh-hardcoded-backdoor)
+        SSH_PORT="${QEMU_SSH_PORT:-2222}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+        EXTRA_ENDPOINT="SSH: ssh -p ${SSH_PORT} support@127.0.0.1"
+        ;;
+    router-cwe798-*)
+        SSH_PORT="${QEMU_SSH_PORT:-2222}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+        EXTRA_ENDPOINT="SSH: ssh -p ${SSH_PORT} routerweb@127.0.0.1"
+        ;;
+    *-cwe078-service-interface-injection)
+        SERVICE_PORT="${QEMU_SERVICE_PORT:-9090}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SERVICE_PORT}-:9090"
+        EXTRA_ENDPOINT="Service interface: 127.0.0.1:${SERVICE_PORT}"
+        ;;
+    smartplug-*|thermostat-*|smartbulb-*|smarthub-*|envsensor-*|smartspeaker-*|healthmonitor-*|doorlock-*)
+        MQTT_PORT="${QEMU_MQTT_PORT:-1883}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MQTT_PORT}-:1883"
+        EXTRA_ENDPOINT="MQTT: 127.0.0.1:${MQTT_PORT}"
+        ;;
+    plc-*)
+        MODBUS_PORT="${QEMU_MODBUS_PORT:-1502}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MODBUS_PORT}-:502"
+        EXTRA_ENDPOINT="Modbus/TCP: 127.0.0.1:${MODBUS_PORT}"
+        ;;
+esac
+
+case "${FIRMWARE}" in
+    smartbulb-cwe122-zcl-heap-overflow)
+        ZCL_PORT="${QEMU_ZCL_PORT:-17754}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${ZCL_PORT}-:17754"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}; ZCL bridge: 127.0.0.1:${ZCL_PORT}"
+        ;;
+    smartspeaker-cwe122-id3-heap-overflow)
+        MEDIA_PORT="${QEMU_MEDIA_PORT:-18000}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MEDIA_PORT}-:18000"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}; media parser: 127.0.0.1:${MEDIA_PORT}"
+        ;;
+    healthmonitor-cwe200-memory-disclosure)
+        HEALTH_PORT="${QEMU_HEALTH_PORT:-2575}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${HEALTH_PORT}-:2575"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}; patient protocol: 127.0.0.1:${HEALTH_PORT}"
+        ;;
+esac
 
 # Per-architecture QEMU parameters.
 case "${MACHINE}" in
@@ -53,6 +108,7 @@ CPU_ARG=""
 
 echo "Firmware: ${FIRMWARE} (${MACHINE})"
 echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
+[ -n "${EXTRA_ENDPOINT}" ] && echo "${EXTRA_ENDPOINT}"
 
 # shellcheck disable=SC2086
 exec "${QBIN}" \
@@ -65,7 +121,7 @@ exec "${QBIN}" \
     -append "root=/dev/vda rw console=${CONSOLE} ip=dhcp ${APPEND_EXTRA}" \
     -drive "id=disk0,file=${ROOTFS},if=none,format=raw" \
     -device virtio-blk-pci,drive=disk0 \
-    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80" \
+    -netdev "${NETDEV}" \
     -device virtio-net-pci,netdev=net0 \
     -object rng-random,filename=/dev/urandom,id=rng0 \
     -device virtio-rng-pci,rng=rng0 \

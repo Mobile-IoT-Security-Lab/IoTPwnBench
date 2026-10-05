@@ -64,31 +64,52 @@ web admin (which shows them in a **Sensors** panel):
 | --- | --- | --- |
 | router | web admin | HTTP :80 |
 | ipcamera | HTTP snapshot + MJPEG stream | `/snapshot.jpg`, `/stream.cgi` |
-| smartplug, thermostat | MQTT publisher + local broker | `iotbench/<class>/<peripheral>` on :1883 |
+| smartplug, thermostat, smartbulb, smarthub, envsensor, smartspeaker, healthmonitor, doorlock | MQTT publisher + local broker | `iotbench/<class>/<peripheral>` on :1883 |
 | plc | Modbus/TCP server | registers on :502 |
 
 ## Firmware catalog
 
-All firmwares carry CWE-78 (web-admin ping diagnostic → shell). Firmware id is
+All device profiles retain their CWE-78 scenario. The router uses a web-admin
+ping diagnostic; every other device reaches the flaw through its native HTTP,
+MQTT, or Modbus service. Firmware id is
 `<device>-cwe078-os-command-injection`.
 
 | Device | Category | Native service |
 | --- | --- | --- |
 | `router` | network gateway | web admin (HTTP) |
-| `ipcamera` | surveillance camera | HTTP snapshot + MJPEG |
-| `smartplug` | energy management | MQTT |
-| `thermostat` | climate control | MQTT |
-| `plc` | industrial gateway (OT) | Modbus/TCP |
-| `smartbulb` | lighting | MQTT |
-| `smarthub` | controller / hub | MQTT |
-| `envsensor` | environmental sensor | MQTT |
-| `smartspeaker` | audio / voice assistant | MQTT |
-| `healthmonitor` | health monitor | MQTT |
-| `doorlock` | access control | MQTT |
+| `ipcamera` | surveillance camera | PTZ CGI command injection over HTTP |
+| `smartplug` | energy management | MQTT relay-schedule command injection |
+| `thermostat` | climate control | MQTT HVAC-profile command injection |
+| `plc` | industrial gateway (OT) | Modbus/TCP project-apply command injection |
+| `smartbulb` | lighting | MQTT scene command injection |
+| `smarthub` | controller / hub | MQTT pairing-backup command injection |
+| `envsensor` | environmental sensor | MQTT calibration command injection |
+| `smartspeaker` | audio / voice assistant | MQTT media-source command injection |
+| `healthmonitor` | health monitor | MQTT export-target command injection |
+| `doorlock` | access control | MQTT firmware-update command injection |
+
+The catalog also includes one CVE-inspired, device-specific scenario for every
+non-router profile. These are functional reproductions of the weakness and
+attack surface, not copies of vendor firmware:
+
+| Firmware id | CWE | Device-specific scenario |
+| --- | --- | --- |
+| `ipcamera-cwe022-recording-path-traversal` | CWE-22 | Recording-export CGI path traversal |
+| `smartplug-cwe862-missing-authorization` | CWE-862 | Cross-owner MQTT relay control |
+| `thermostat-cwe294-command-replay` | CWE-294 | Replayable authenticated setpoint frame |
+| `smartbulb-cwe122-zcl-heap-overflow` | CWE-122 | ZCL commissioning string heap overflow |
+| `smarthub-cwe121-database-stack-overflow` | CWE-121 | Hub database bucket stack overflow |
+| `envsensor-cwe306-unauthenticated-calibration` | CWE-306 | Calibration change without authentication |
+| `smartspeaker-cwe122-id3-heap-overflow` | CWE-122 | ID3 metadata heap overflow |
+| `healthmonitor-cwe200-memory-disclosure` | CWE-200 | Unauthenticated patient-memory read |
+| `doorlock-cwe294-unlock-replay` | CWE-294 | Replayable authenticated unlock frame |
+| `plc-cwe121-modbus-stack-overflow` | CWE-121 | Vendor Modbus project-chunk stack overflow |
 
 Each firmware maps to `recipes-images/iotbench-<firmware id>.bb`. The catalog is
 the set of those recipes; the table above is a convenience copy. Every device
 carries a distinct simulated peripheral set (`recipes-devices/<device>/files/peripherals.conf`).
+Native-service payloads, register maps and CVE analogues are documented in
+[docs/device-payloads.md](docs/device-payloads.md).
 
 Additional router scenarios from the Francesco catalog slice:
 
@@ -96,9 +117,9 @@ Additional router scenarios from the Francesco catalog slice:
 | --- | --- | --- |
 | `router-cwe276-leaked-private-key` | CWE-276 | Private key exposed under the web document root |
 | `router-cwe276-bad-chown-rights` | CWE-276 | Privileged configuration file owned by the web user |
-| `router-cwe798-ld-preload-sudo` | CWE-798 | Sudo rule preserving `LD_PRELOAD` for a root command |
-| `router-cwe798-vi-privilege-escalation` | CWE-798 | Passwordless sudo rule for a privileged editor |
-| `router-cwe078-writable-root-cron` | CWE-78 | Root cron entry executes a web-user-writable script |
+| `router-cwe798-ld-preload-sudo` | CWE-798 | Hardcoded support password reaches an LD_PRELOAD-capable maintenance command |
+| `router-cwe798-vi-privilege-escalation` | CWE-798 | Hardcoded maintenance password reaches a privileged editor workflow |
+| `router-cwe078-writable-root-cron` | CWE-78 | Root cron interpolates a web-user-controlled target into a shell command |
 | `router-cwe287-ssh-hardcoded-backdoor` | CWE-287 | Hardcoded SSH support account |
 | `router-cwe089-http-sqli-auth` | CWE-89 | HTTP login SQL injection |
 | `router-cwe078-bash-command-injection` | CWE-78 | Bash diagnostic command injection |
@@ -106,10 +127,12 @@ Additional router scenarios from the Francesco catalog slice:
 | `router-cwe416-use-after-free` | CWE-416 | Freed authorization object reuse |
 | `router-cwe400-diagnostic-dos` | CWE-400 | Diagnostic resource exhaustion |
 | `router-cwe078-service-interface-injection` | CWE-78 | TCP service interface command injection |
-| `router-cwe022-path-traversal` | CWE-22 | Report viewer path traversal |
+| `router-cwe022-path-traversal` | CWE-22 | Global Lighttpd fallback path traversal |
 
 Payloads and expected exploit signals for these scenarios are documented in
 [docs/francesco-payloads.md](docs/francesco-payloads.md).
+That guide also identifies the canonical attacker position for each image:
+remote HTTP, remote network service, or a local `routerweb` foothold.
 
 ### Device taxonomy
 
@@ -353,6 +376,30 @@ listens on guest port 80; the host port can be changed:
 QEMU_HTTP_PORT=80 ./scripts/run-qemu.sh
 ```
 
+`run-qemu.sh` exposes additional ports only when the selected firmware needs
+them:
+
+| Scenario | Host endpoint | Override |
+| --- | --- | --- |
+| SSH hardcoded backdoor | `127.0.0.1:2222` -> guest `:22` | `QEMU_SSH_PORT` |
+| TCP service injection | `127.0.0.1:9090` -> guest `:9090` | `QEMU_SERVICE_PORT` |
+| MQTT device profiles | `127.0.0.1:1883` -> guest `:1883` | `QEMU_MQTT_PORT` |
+| PLC profile | `127.0.0.1:1502` -> guest `:502` | `QEMU_MODBUS_PORT` |
+| Smart bulb ZCL parser | `127.0.0.1:17754` -> guest `:17754` | `QEMU_ZCL_PORT` |
+| Smart speaker media parser | `127.0.0.1:18000` -> guest `:18000` | `QEMU_MEDIA_PORT` |
+| Health monitor protocol | `127.0.0.1:2575` -> guest `:2575` | `QEMU_HEALTH_PORT` |
+
+For example, start the firmware in one terminal and run the matching client
+command from a second terminal:
+
+```bash
+FIRMWARE=router-cwe287-ssh-hardcoded-backdoor ./scripts/run-qemu.sh
+ssh -p 2222 support@127.0.0.1
+
+FIRMWARE=router-cwe078-service-interface-injection ./scripts/run-qemu.sh
+printf 'status; id\n' | nc 127.0.0.1 9090
+```
+
 On Apple Silicon, hardware acceleration can be enabled:
 
 ```bash
@@ -399,8 +446,10 @@ login: root
 password: routeradmin
 ```
 
-`routerweb` is only the dashboard service account and cannot log in. The `yocto`
-user belongs to the builder container and does not exist in the firmware.
+`routerweb` is normally only the dashboard service account and cannot log in.
+The two CWE-798 images intentionally enable SSH login for it with the shared
+password `iotbench`. The `yocto` user belongs to the builder container and does
+not exist in the firmware.
 Change the password before using the image outside a local development setup.
 
 ## Firmware: router, CWE-78 OS command injection

@@ -1,0 +1,40 @@
+#!/bin/sh
+# INTENTIONALLY VULNERABLE LAB SERVICE.
+# A device-specific MQTT maintenance value is interpolated into a root shell.
+set -u
+
+CLASS=device
+[ -f /etc/iotbench/device.conf ] && . /etc/iotbench/device.conf
+CLASS="${DEVICE_CLASS:-device}"
+
+case "$CLASS" in
+    smartplug)     ACTION=relay-schedule; LABEL=relay-schedule ;;
+    thermostat)    ACTION=hvac-profile;   LABEL=hvac-profile ;;
+    smartbulb)     ACTION=lighting-scene; LABEL=lighting-scene ;;
+    smarthub)      ACTION=pairing-backup; LABEL=pairing-backup ;;
+    envsensor)     ACTION=calibration;    LABEL=sensor-calibration ;;
+    smartspeaker)  ACTION=media-source;   LABEL=media-source ;;
+    healthmonitor) ACTION=export-target;  LABEL=health-export ;;
+    doorlock)      ACTION=firmware-url;   LABEL=lock-firmware ;;
+    *)             ACTION=maintenance;    LABEL=maintenance ;;
+esac
+
+REQUEST_TOPIC="iotbench/${CLASS}/maintenance/${ACTION}"
+RESULT_TOPIC="iotbench/${CLASS}/maintenance-result"
+
+while :; do
+    line="$(mosquitto_sub -h 127.0.0.1 -p 1883 -C 1 -v \
+        -t "$REQUEST_TOPIC" 2>/dev/null)" || {
+        sleep 1
+        continue
+    }
+    payload=${line#* }
+
+    # CWE-78: the MQTT payload is appended without quoting or validation.
+    # A fixed argument vector and per-action schema validation are required.
+    output="$(/bin/sh -c "echo ${LABEL}: ${payload}" 2>&1)"
+    rc=$?
+    mosquitto_pub -h 127.0.0.1 -p 1883 -t "$RESULT_TOPIC" \
+        -m "exit=${rc}
+${output}" 2>/dev/null || true
+done

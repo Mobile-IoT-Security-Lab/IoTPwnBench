@@ -1,0 +1,38 @@
+#!/bin/sh
+# INTENTIONALLY VULNERABLE: calibration is a critical unauthenticated function.
+set -u
+
+REQUEST_TOPIC=iotbench/envsensor/calibration/set
+RESULT_TOPIC=iotbench/envsensor/calibration/result
+
+while :; do
+    mosquitto_sub -h 127.0.0.1 -p 1883 -v -t "$REQUEST_TOPIC" 2>/dev/null |
+    while IFS= read -r line; do
+        payload=${line#* }
+        sensor=""
+        offset=""
+        old_ifs=$IFS
+        IFS=';'
+        for field in $payload; do
+            case "$field" in
+                sensor=*) sensor=${field#sensor=} ;;
+                offset=*) offset=${field#offset=} ;;
+            esac
+        done
+        IFS=$old_ifs
+
+        case "$sensor" in co2|temperature|humidity) ;; *) sensor="" ;; esac
+        case "$offset" in ''|*[!0-9+.-]*) offset="" ;; esac
+        if [ -z "$sensor" ] || [ -z "$offset" ]; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected malformed calibration" || true
+            continue
+        fi
+
+        # CWE-306: no authentication is required before changing calibration.
+        mkdir -p /run/iotbench/calibration
+        printf '%s\n' "$offset" > "/run/iotbench/calibration/${sensor}"
+        mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" \
+            -m "calibration-updated sensor=${sensor} offset=${offset} authenticated=no" || true
+    done
+    sleep 1
+done

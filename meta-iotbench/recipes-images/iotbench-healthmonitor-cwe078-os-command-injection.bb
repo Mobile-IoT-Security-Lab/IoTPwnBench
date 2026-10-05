@@ -1,8 +1,8 @@
 require recipes-images/iotbench-image.inc
 require recipes-devices/healthmonitor/device-healthmonitor.inc
 
-SUMMARY = "IoTBench target - healthmonitor, CWE-78 OS command injection (ping diagnostic)"
-DESCRIPTION = "healthmonitor firmware whose web-admin ping diagnostic passes unsanitized input to a shell command, exposing OS command injection (CWE-78)."
+SUMMARY = "IoTBench target - health monitor, CWE-78 MQTT command injection"
+DESCRIPTION = "Health monitor firmware whose privileged export-target agent interpolates an MQTT payload into a shell command."
 
 IOTBENCH_CWE = "CWE-78"
-IOTBENCH_VULN_INSTALL = "cwe078-os-command-injection"
+IOTBENCH_VULN_INSTALL = "cwe078-mqtt-command-injection"

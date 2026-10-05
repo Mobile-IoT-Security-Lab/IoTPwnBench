@@ -1,0 +1,64 @@
+#!/bin/sh
+# INTENTIONALLY VULNERABLE: authenticated frames have no freshness check.
+set -u
+
+CLASS=device
+[ -f /etc/iotbench/device.conf ] && . /etc/iotbench/device.conf
+CLASS="${DEVICE_CLASS:-device}"
+
+case "$CLASS" in
+    thermostat)
+        REQUEST_TOPIC=iotbench/thermostat/rf/command
+        RESULT_TOPIC=iotbench/thermostat/rf/result
+        VALUE_KEY=setpoint
+        STATE_FILE=/run/iotbench/thermostat-setpoint
+        ;;
+    doorlock)
+        REQUEST_TOPIC=iotbench/doorlock/ble/command
+        RESULT_TOPIC=iotbench/doorlock/ble/result
+        VALUE_KEY=action
+        STATE_FILE=/run/iotbench/doorlock-state
+        ;;
+    *)
+        echo "unsupported device class: $CLASS" >&2
+        exit 1
+        ;;
+esac
+
+COUNT_FILE="/run/iotbench/${CLASS}-accepted-frames"
+mkdir -p /run/iotbench
+
+while :; do
+    mosquitto_sub -h 127.0.0.1 -p 1883 -v -t "$REQUEST_TOPIC" 2>/dev/null |
+    while IFS= read -r line; do
+        payload=${line#* }
+        sequence=""
+        value=""
+        authenticated=no
+        old_ifs=$IFS
+        IFS=';'
+        for field in $payload; do
+            case "$field" in
+                seq=*) sequence=${field#seq=} ;;
+                auth=valid-captured-frame) authenticated=yes ;;
+                "$VALUE_KEY"=*) value=${field#*=} ;;
+            esac
+        done
+        IFS=$old_ifs
+
+        if [ "$authenticated" != yes ] || [ -z "$sequence" ] || [ -z "$value" ]; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected invalid frame" || true
+            continue
+        fi
+
+        # CWE-294: sequence is logged but never checked against previously seen frames.
+        count=0
+        [ -f "$COUNT_FILE" ] && count="$(cat "$COUNT_FILE")"
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$COUNT_FILE"
+        printf '%s\n' "$value" > "$STATE_FILE"
+        mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" \
+            -m "accepted seq=${sequence} ${VALUE_KEY}=${value} count=${count}" || true
+    done
+    sleep 1
+done

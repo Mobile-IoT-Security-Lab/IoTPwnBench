@@ -3,7 +3,7 @@ DESCRIPTION = "Runs a TCP service interface that passes unsanitized commands to 
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-SRC_URI = "file://module.php file://iotbench-service-iface.c file://iotbench-service-iface.service"
+SRC_URI = "file://iotbench-service-iface.c file://iotbench-service-iface.service"
 
 S = "${UNPACKDIR}"
 
@@ -23,8 +23,6 @@ do_install() {
     install -m 0755 ${B}/iotbench-service-iface ${D}${bindir}/iotbench-service-iface
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${S}/iotbench-service-iface.service ${D}${systemd_system_unitdir}/iotbench-service-iface.service
-    install -d ${D}${datadir}/router-dashboard/modules/service-injection
-    install -m 0644 ${S}/module.php ${D}${datadir}/router-dashboard/modules/service-injection/module.php
 }
 
-FILES:${PN} = "${bindir}/iotbench-service-iface ${systemd_system_unitdir}/iotbench-service-iface.service ${datadir}/router-dashboard/modules/service-injection"
+FILES:${PN} = "${bindir}/iotbench-service-iface ${systemd_system_unitdir}/iotbench-service-iface.service"

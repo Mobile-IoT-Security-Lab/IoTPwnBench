@@ -206,7 +206,7 @@ The image recipe still just lists the packages via `IOTBENCH_DEVICE_INSTALL` and
 values. Implemented templates to copy:
 
 - **MQTT** (`recipes-platform/iotbench-mqtt/`) — a publisher against a local
-  mosquitto broker; used by `smartplug` and `thermostat`.
+  mosquitto broker; used by every MQTT-class device profile.
 - **Modbus/TCP** (`recipes-devices/plc/iotbench-modbusd_1.0.bb`) — a libmodbus
   server mapping peripherals to registers.
 - **HTTP snapshot + MJPEG** (`recipes-devices/ipcamera/ipcamera-stream_1.0.bb`) —

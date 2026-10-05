@@ -1,14 +1,14 @@
-SUMMARY = "IoTBench vulnerability module - CWE-798 sudo LD_PRELOAD code injection"
-DESCRIPTION = "Allows the web user to preserve LD_PRELOAD through sudo for a root command. Intentionally vulnerable; lab use only."
+SUMMARY = "IoTBench vulnerability module - CWE-798 hardcoded support credential"
+DESCRIPTION = "A firmware-wide support password grants the routerweb account SSH access and authorizes its restricted LD_PRELOAD-capable sudo command. Intentionally vulnerable; lab use only."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-SRC_URI = "file://module.php file://ldpreload-target.c file://preload-marker.c file://iotbench-ldpreload-sudoers"
+SRC_URI = "file://ldpreload-target.c file://preload-marker.c file://iotbench-ldpreload-sudoers"
 
 S = "${UNPACKDIR}"
 
 DEPENDS += "virtual/libc"
-RDEPENDS:${PN} = "router-dashboard sudo"
+RDEPENDS:${PN} = "router-dashboard sudo dropbear"
 
 do_compile() {
     ${CC} ${CFLAGS} ${LDFLAGS} ${S}/ldpreload-target.c -o ${B}/ldpreload-target
@@ -22,8 +22,6 @@ do_install() {
     install -m 0755 ${B}/preload-marker.so ${D}${libdir}/iotbench/preload-marker.so
     install -d ${D}${sysconfdir}/sudoers.d
     install -m 0440 ${S}/iotbench-ldpreload-sudoers ${D}${sysconfdir}/sudoers.d/iotbench-ldpreload
-    install -d ${D}${datadir}/router-dashboard/modules/ldpreload
-    install -m 0644 ${S}/module.php ${D}${datadir}/router-dashboard/modules/ldpreload/module.php
 }
 
-FILES:${PN} = "${bindir}/ldpreload-target ${libdir}/iotbench/preload-marker.so ${sysconfdir}/sudoers.d/iotbench-ldpreload ${datadir}/router-dashboard/modules/ldpreload"
+FILES:${PN} = "${bindir}/ldpreload-target ${libdir}/iotbench/preload-marker.so ${sysconfdir}/sudoers.d/iotbench-ldpreload"

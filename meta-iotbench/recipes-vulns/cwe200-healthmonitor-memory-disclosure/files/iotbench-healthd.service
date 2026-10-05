@@ -1,0 +1,11 @@
+[Unit]
+Description=IoTBench vulnerable patient monitor protocol service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/iotbench-healthd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
