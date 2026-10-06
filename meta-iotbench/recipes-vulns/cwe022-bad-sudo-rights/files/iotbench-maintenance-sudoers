@@ -1,0 +1,3 @@
+# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+# Incorrect: the argument wildcard also matches slashes and ../ segments.
+fixturetest ALL=(root) NOPASSWD: @BINDIR@/iotbench-maintenance-read @FIXTURE_ROOT@/data/*

@@ -1,4 +1,10 @@
-# Weak Cipher: 3DES Device Backups
+# Luca Payloads
+
+This guide documents the Luca firmware scenarios and their reproducible lab
+payloads. See [Hardcoded credentials (CWE-798)](#hardcoded-credentials-cwe-798)
+for the shared vendor support account on all eleven devices.
+
+## Weak Cipher: 3DES Device Backups
 
 These images implement intentionally vulnerable device backup encryption under
 [CWE-327](https://cwe.mitre.org/data/definitions/327.html) (use of a broken or
@@ -8,7 +14,7 @@ The image IDs follow `<device>-cwe327-weak-cipher` for all eleven device profile
 listed in the root README. The recipes work with the existing architecture
 selector and require no new layers or external source downloads.
 
-## Scenario and scope
+### Scenario and scope
 
 The shared web admin encrypts and restores device backup text using three-key
 Triple DES in CBC mode with PKCS#7 padding. OpenSSL's
@@ -45,7 +51,7 @@ Malformed frames and modifications without a recomputed tag are rejected before
 decryption. Since the HMAC key is also public, this check provides no trustworthy
 authentication: anyone can recompute a valid tag. Frames must carry the fixed IV.
 
-## Build and boot
+### Build and boot
 
 From the repository root:
 
@@ -60,7 +66,7 @@ Replace `router` with any supported device. The root README provides the loop
 to build all eleven images. Output is exported to
 `deploy-images/<device>-cwe327-weak-cipher/<machine>/`.
 
-## Dashboard and HTTP API
+### Dashboard and HTTP API
 
 Open `http://127.0.0.1:8080`, locate **Device Backup Encryption**, leave the
 operation as **Encrypt**, and submit backup text. The output begins with:
@@ -90,7 +96,7 @@ are supplied by the shared dashboard. Backup text must be UTF-8 and no more
 than 4096 bytes; the encrypted frame is at most 8297 ASCII characters. The CLI
 also supports binary plaintext and empty input.
 
-## Guest CLI and frame format
+### Guest CLI and frame format
 
 From the guest serial console:
 
@@ -109,7 +115,7 @@ The CLI accepts only `encrypt` or `decrypt`; there is no key-file argument.
 The web action passes input through stdin and invokes a fixed argument vector
 without a shell.
 
-## Verification
+### Verification
 
 The regression script exercises binary/text round trips, the 4096-byte limit,
 hardcoded key/IV interoperability with OpenSSL, identical output from separate
@@ -145,7 +151,7 @@ lighttpd drop-in permits writes only to `/var/lib/router-dashboard` for
 dashboard state; it needs no privilege escalation or additional
 service ports.
 
-# Permitted Root SSH Login (CWE-276)
+## Permitted Root SSH Login (CWE-276)
 
 The `cwe276-permit-root-login` module intentionally permits direct SSH login
 as `root` using a password. Image IDs follow
@@ -155,7 +161,7 @@ and the privileges obtained. Source inspection alone does not confirm that a
 running firmware accepts the login; the commands below are a verification
 procedure, not a record of completed runtime tests.
 
-## Configuration and security implications
+### Configuration and security implications
 
 The module recipe is
 [`cwe276-permit-root-login_1.0.bb`](../meta-iotbench/recipes-vulns/cwe276-permit-root-login/cwe276-permit-root-login_1.0.bb).
@@ -183,7 +189,7 @@ The presence of `PermitRootLogin yes` alone does not establish that an attacker
 can authenticate: the effective configuration, account state and network
 reachability must also be checked.
 
-## Build and boot
+### Build and boot
 
 From the repository root, build the image if it has not already been exported,
 then boot it:
@@ -199,7 +205,7 @@ Replace `router` with another supported device if needed. The existing
 images; `QEMU_SSH_PORT` changes the host port. Use a second host terminal for
 the SSH test while QEMU remains running.
 
-## Verify the effective configuration
+### Verify the effective configuration
 
 Log in through the guest serial console as `root` with password `routeradmin`,
 then run inside the guest:
@@ -234,7 +240,7 @@ command-line overrides, reproduce those options in the verification command.
 behavior of the running service. See the
 [OpenSSH test-mode documentation](https://man.openbsd.org/sshd.8).
 
-## Verify login and privileges without changing the guest
+### Verify login and privileges without changing the guest
 
 From the second terminal on the host:
 
@@ -261,7 +267,7 @@ demonstrate the impact.
 | `Permission denied` | Authentication was rejected; check effective policy, credential and account state before drawing a conclusion. |
 | Command output contains `uid=0(root)` | Direct root access with the default password is confirmed. |
 
-## Exposure and severity
+### Exposure and severity
 
 The provided QEMU forwarding binds to `127.0.0.1`, so that forwarded SSH port
 is reachable from the local host. This limits exposure in the supplied lab
@@ -275,7 +281,7 @@ still valid, any additional authentication requirements and the scope of the
 obtained privileges. Record the tested image and architecture, effective
 settings, connection endpoint and `id` output as evidence.
 
-## Remediation and verification
+### Remediation and verification
 
 For a firmware intended for real use, disable direct root SSH login:
 
@@ -305,9 +311,9 @@ authentication is also rejected if a root key was previously authorized.
 The default QEMU run discards guest changes when it exits, so a lasting fix
 must be applied to the firmware sources and verified in a rebuilt image.
 
-# Allow anonymous login (CWE-276)
+## Allow anonymous login (CWE-276)
 
-## Scenario and CWE mapping
+### Scenario and CWE mapping
 
 Each `<device>-cwe276-allow-anonymous-login` firmware enables anonymous FTP
 access to a maintenance backup by default. The supported devices are `router`,
@@ -330,7 +336,7 @@ The expected impact is disclosure of device identity, network configuration
 and peripheral layout. The anonymous session is read-only and confined to its
 FTP directory. It does not provide a shell or administrative privileges.
 
-## Package and runtime behavior
+### Package and runtime behavior
 
 The package is
 [`cwe276-allow-anonymous-login`](../meta-iotbench/recipes-vulns/cwe276-allow-anonymous-login/cwe276-allow-anonymous-login_1.0.bb).
@@ -386,7 +392,7 @@ The backup is a snapshot at FTP service startup; restart `vsftpd.service`
 to refresh it after changing dashboard settings. The settings schema is shared
 across devices, while identity and peripherals differ by device.
 
-## Build and boot
+### Build and boot
 
 From the repository root, validate recipes and dependencies, build and boot:
 
@@ -435,7 +441,7 @@ free and run one anonymous-FTP QEMU instance at a time. All forwarding binds
 only to loopback; on a directly reachable device the guest FTP listener would
 be accessible at its own IP address.
 
-## Payloads and expected results
+### Payloads and expected results
 
 Run these commands in a second host terminal while QEMU remains running with
 `QEMU_FTP_PORT=22121`. List the directory and download the settings without a
@@ -473,7 +479,7 @@ Expected control response: `230 Login successful.` followed by the downloaded
 settings. This establishes both credential-free login and actual data access.
 A welcome banner or a successful TCP connection alone is insufficient evidence.
 
-## Regression and guest inspection
+### Regression and guest inspection
 
 The [regression client](../scripts/test-anonymous-login.py) uses Python's
 standard library and tests both `anonymous` and the `ftp` alias. It verifies
@@ -492,7 +498,7 @@ architecture; test each exported device image separately.
 If QEMU was started without a port override, use `2121` in the curl and inline
 Python examples and pass `--port 2121` to the regression client (its default).
 
-### Connection refused: check the host control port
+#### Connection refused: check the host control port
 
 `curl: (7) Failed to connect to 127.0.0.1 port 2121` means curl could not
 establish the TCP connection; it has not attempted FTP authentication. A QEMU
@@ -511,7 +517,7 @@ is listening, start the selected firmware and check its startup output for
 errors. A host forwarding failure, such as an occupied HTTP port, prevents QEMU
 from starting; free the conflicting port or select another `QEMU_HTTP_PORT`.
 
-### Inspect the guest service
+#### Inspect the guest service
 
 Log in on the guest serial console with the root credential from the README
 and inspect the running service and exported files:
@@ -530,7 +536,7 @@ forwarding. If login fails or the service is inactive, inspect
 `journalctl -u vsftpd.service` and the installed drop-in. The upstream
 `/etc/vsftpd.conf` is not the configuration used by this variant.
 
-## Completed validation
+### Completed validation
 
 On 2026-10-05, all eleven `qemuarm64` targets passed BitBake parsing,
 dependency resolution and actual compilation/export. Each exported image was
@@ -546,7 +552,7 @@ including checksums, is `deploy-images/anonymous-login-qemuarm64-validation.txt`
 Other supported architectures have not been built or boot-tested for this
 scenario in this validation run.
 
-## Remediation and verification
+### Remediation and verification
 
 Disable anonymous login in `/etc/iotbench/vsftpd-anonymous.conf`:
 
@@ -567,3 +573,1007 @@ backup download. The supplied regression client should fail against a fixed
 image because its positive anonymous-access checks describe the vulnerable
 benchmark. Apply lasting remediation in the sources and rebuild; default QEMU
 snapshots discard guest edits on exit.
+
+## Hardcoded credentials (CWE-798)
+
+### Scenario, scope and attacker position
+
+The firmware IDs are `<device>-cwe798-hardcoded-credentials` for all eleven
+profiles in the root README. Each image combines its normal device profile
+with the single vulnerability package `cwe798-hardcoded-credentials`.
+
+The shared web admin exposes **Vendor Support Backup**, an authenticated
+maintenance export. This implements the inbound variant of
+[CWE-798: Use of Hard-coded Credentials](https://cwe.mitre.org/data/definitions/798.html):
+input is checked against credentials embedded in the product, identical in
+every installation, without a supported way to change them.
+
+| Credential | Exact, case-sensitive value |
+| --- | --- |
+| Username | `support` |
+| Password | `iotbench-support-2026` |
+
+These are plaintext constants in
+`/usr/share/router-dashboard/modules/hardcoded-credentials/module.php`.
+There is no random provisioning, environment override, runtime password file
+or password-change API. Knowing the credential from one extracted image gives
+access to the same support function on every device and fresh boot.
+
+The canonical attacker is a remote HTTP client with knowledge of the firmware
+credential, acquired from firmware extraction or this published lab fixture.
+The attacker loads the public dashboard to obtain its request token and submits
+the credential to the support action. That token guards requests against CSRF;
+it does not authenticate a support user.
+
+The exported `backup.maintenance` object is read from a real installed file,
+`/usr/share/iotbench/hardcoded-credentials/support-backup.json`, outside
+`/www/pages`. It contains synthetic, maintenance-only provisioning and
+inventory data; successful export also includes device identity, dashboard
+settings and live peripheral values. The support credential guards this
+maintenance export. The existing public dashboard/telemetry is still public;
+this module does not add a login wall around the shared platform.
+
+The support account is an application identity, not a Linux or SSH account.
+The action runs as `routerweb`, with no sudo permission or shell execution.
+Native camera, MQTT and Modbus services retain their normal telemetry role;
+the HTTP support interface is the same across devices. There are no service
+sandbox overrides or new layers. This scenario is separate from the router's
+existing CWE-798 sudo/editor images.
+
+For MQTT profiles, the shared Mosquitto build retains its systemd feature so
+the upstream `Type=notify` unit finishes starting and releases the telemetry
+publisher. TLS and websockets remain disabled in this lab build. The baseline
+broker listens on guest loopback; inspect native telemetry from the guest
+console with `mosquitto_sub -h 127.0.0.1 -t iotbench/<device>/state -C 1`.
+QEMU port forwarding alone does not expose this loopback-only broker.
+
+### Build and boot
+
+From the repository root, validate one target and build it:
+
+```bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe798-hardcoded-credentials'
+FIRMWARE=router-cwe798-hardcoded-credentials docker compose run --rm yocto
+FIRMWARE=router-cwe798-hardcoded-credentials ./scripts/run-qemu.sh
+```
+
+Replace `router` with any supported device. To build all eleven images:
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe798-hardcoded-credentials.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+The default machine is `qemuarm64`. Set `YOCTO_MACHINE` consistently when
+building and booting another supported architecture. Output is exported to
+`deploy-images/<device>-cwe798-hardcoded-credentials/<machine>/`, containing
+the compressed ext4 rootfs and kernel. `scripts/build-all.sh` includes all new
+recipes automatically.
+
+Open `http://127.0.0.1:8080` and use **Vendor Support Backup**. Enter the account
+above and choose **Export support backup**. The UI leaves both fields empty
+initially. Expected output starts with `HARDCODED_CREDENTIALS_ACCEPTED` and
+prints the backup JSON. Incorrect credentials show `Invalid support credentials`.
+If port 8080 is occupied, boot with `QEMU_HTTP_PORT=18080` and use
+`http://127.0.0.1:18080` in the examples and test client.
+
+### Firmware extraction
+
+From the guest serial console, log in with the root credential documented in
+the README and inspect the module:
+
+```bash
+sed -n '/const IOTBENCH_SUPPORT_USERNAME/p; /const IOTBENCH_SUPPORT_PASSWORD/p' \
+  /usr/share/router-dashboard/modules/hardcoded-credentials/module.php
+cat /usr/share/iotbench/hardcoded-credentials/support-backup.json
+```
+
+Expected: the two constants show the exact username/password above. They are
+the values actually used in `hash_equals()` by the support action.
+Serial inspection is evidence of recoverability, not a remote attacker step.
+
+An attacker with only the exported firmware can extract the same values
+offline. On a host with `zstd` and the e2fsprogs `debugfs` utility:
+
+```bash
+zstd -d \
+  deploy-images/router-cwe798-hardcoded-credentials/qemuarm64/iotbench-router-cwe798-hardcoded-credentials-qemuarm64.rootfs.ext4.zst \
+  -o /tmp/iotbench-hardcoded-credentials.ext4
+debugfs -R 'cat /usr/share/router-dashboard/modules/hardcoded-credentials/module.php' \
+  /tmp/iotbench-hardcoded-credentials.ext4
+```
+
+This reads the ext4 image without mounting or booting it. Local access to the
+firmware file is sufficient; network requests for the module source or the
+backup file return HTTP 404 because those files are outside the document root.
+
+### HTTP payloads and expected results
+
+The API is `POST /api.php` with JSON action `support_backup` and header
+`X-Dashboard-Token`. A valid request body is:
+
+```json
+{"action":"support_backup","username":"support","password":"iotbench-support-2026"}
+```
+
+This dependency-free Python example retrieves the public token and performs
+the export from a host terminal while QEMU is running:
+
+```bash
+python3 - <<'PY'
+from html.parser import HTMLParser
+import json
+import urllib.request
+
+base = "http://127.0.0.1:8080"
+
+class TokenParser(HTMLParser):
+    token = None
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta" and attrs.get("name") == "dashboard-token":
+            self.token = attrs.get("content")
+
+with urllib.request.urlopen(base + "/", timeout=10) as response:
+    page = response.read().decode()
+parser = TokenParser()
+parser.feed(page)
+assert parser.token, "Dashboard token not found"
+request = urllib.request.Request(
+    base + "/api.php",
+    data=json.dumps({"action": "support_backup", "username": "support",
+                     "password": "iotbench-support-2026"}).encode(),
+    headers={"Content-Type": "application/json",
+             "X-Dashboard-Token": parser.token},
+)
+with urllib.request.urlopen(request, timeout=10) as response:
+    print(response.status)
+    print(json.dumps(json.load(response), indent=2))
+PY
+```
+
+Expected: HTTP 200, `ok: true`, `authenticated_as: "support"`, the selected
+device class, `signal: "HARDCODED_CREDENTIALS_ACCEPTED"`, and a backup including
+`maintenance.backup_scope: "vendor-support-only"` and
+`maintenance.inventory_reference: "IOTBENCH-SUPPORT-LAB"`. Peripheral values
+can differ across requests because the simulator runs continuously.
+
+| Request condition | Expected HTTP result |
+| --- | --- |
+| Exact published username and password, valid token | 200; maintenance backup exported |
+| Missing, empty or incorrect credentials, valid token | 401; `Invalid support credentials`, no backup |
+| Array/object credential or username >64 bytes / password >128 bytes | 422; `Invalid credential format`, no backup |
+| Missing or invalid dashboard token | 403 before the action runs |
+| Direct URL for the module or backup file | 404 |
+
+Each export checks the credentials again. A successful request does not create
+a login session that permits subsequent anonymous exports. There is no SQL,
+user-controlled filename or command evaluation: the measured weakness is the
+fixed credential used by the actual authentication check.
+
+### Regression verification
+
+With the selected image running, execute:
+
+```bash
+python3 scripts/test-hardcoded-credentials.py --device router
+# For a different device and host HTTP port:
+python3 scripts/test-hardcoded-credentials.py \
+  --device plc --url http://127.0.0.1:18080
+```
+
+Expected: four `PASS` lines and exit status zero. The client checks the panel,
+request-token enforcement, correct/incorrect/missing credentials, malformed
+input, repeated authenticated exports, device identity, live peripherals,
+the maintenance fixture, direct-file HTTP denial and absence of a persistent
+authentication bypass. It requires only Python 3's standard library.
+
+Boot and test each device separately. Repeat after reboot to confirm the
+credential is unchanged. Reuse this same client/credential on another device
+to demonstrate cross-device access.
+
+### Completed validation
+
+On 2026-10-06, all eleven `qemuarm64` targets passed BitBake parsing,
+dependency resolution, actual compilation and export. Every exported image
+was booted in QEMU with HVF and the host CPU and passed the HTTP regression
+client. The same support credential was accepted across all device profiles.
+
+Native-service checks also passed: HTTP dashboard for the router, JPEG snapshot
+and MJPEG stream for the camera, Modbus holding registers 0-3 for the PLC, and
+live MQTT state messages on guest loopback for the other eight profiles.
+Serial inspection confirmed both `mosquitto` and `iotbench-mqtt` active on
+each MQTT device after the systemd build correction.
+
+Offline `debugfs` inspection of all eleven compressed exported root filesystems
+confirmed the exact installed module, support fixture and device identity.
+Package manifests contained exactly one vulnerability package,
+`cwe798-hardcoded-credentials`. Module bytes and embedded credentials were
+identical across the eleven exports.
+
+The local report, including kernel/rootfs SHA-256 checksums and offline
+inspection results, is
+`deploy-images/hardcoded-credentials-qemuarm64-validation.txt`.
+Validation used host HTTP port `18080` and Modbus port `11502`; MQTT checks
+ran from the guest serial console because the baseline broker is local-only.
+Other supported architectures have not been built or boot-tested for this
+scenario in this run.
+
+### Remediation and verification
+
+Replace embedded shared credentials with unique credentials enrolled for each
+device or user. Store salted password hashes in an access-controlled credential
+store, support rotation/revocation, and authorize maintenance exports explicitly.
+These changes follow the inbound-authentication guidance in
+[MITRE CWE-798](https://cwe.mitre.org/data/definitions/798.html).
+
+Changing a fleet-wide literal or embedding its hash still leaves a shared
+credential. Hiding it from the HTML does not address recovery from firmware.
+The request token is a separate CSRF control and does not replace authentication.
+
+In a corrected variant, verify that the published support credential no longer
+exports the backup, a newly enrolled device credential works, and that credential
+fails on another device. Rebuild the sources for lasting changes; default QEMU
+snapshots discard guest edits on exit. The supplied regression client's positive
+CWE-798 check should fail against that corrected variant.
+
+## Bad SUDO Rights — Path Traversal (CWE-22)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+These eleven fixtures reuse the repository's device profiles, common Yocto
+image, architecture selector, build/export scripts and
+one-vulnerability-per-image convention. Each `<device>-cwe022-bad-sudo-rights`
+recipe installs only `cwe022-bad-sudo-rights` as its vulnerability package. The
+local scenario does not attach an action to the shared dashboard or native
+device services.
+
+The ground-truth vulnerability is **Path Traversal reachable through an overly
+permissive sudo rule / privileged sudo helper**, labeled **CWE-22**. The unsafe
+sudo configuration is part of this single scenario, not a second independent
+vulnerability label. The attacker position is the synthetic local account
+`fixturetest` (UID/GID 994), with a locked password and `/bin/false` login
+shell. The guest root console switches to this identity only to simulate the
+foothold; no SSH account, password credential or remote entry point is added.
+
+### Shared files and containment
+
+The package source directory is
+`meta-iotbench/recipes-vulns/cwe022-bad-sudo-rights/`. Its recipe compiles
+`files/maintenance-read.c` with the normal Yocto `${CC}`, `${CFLAGS}` and
+`${LDFLAGS}`. The installed reader is root-owned `0755`, with no setuid bit;
+only sudo supplies its elevated execution context. The installed policy is
+root-owned `0440` at `/etc/sudoers.d/iotbench-maintenance`:
+
+```sudoers
+fixturetest ALL=(root) NOPASSWD: /usr/bin/iotbench-maintenance-read /usr/share/iotbench/bad-sudo-rights/data/*
+```
+
+The sudo argument wildcard accepts slash characters and parent-directory
+segments. The helper checks the raw `.../data/` prefix, one argument and a
+240-byte maximum, but deliberately does not canonicalize the path or verify that
+its resolved target remains in `data/`. It opens the path with `open()` and
+returns at most 65536 bytes from a regular file. It never launches a shell,
+executes commands, writes files, installs packages, contacts external systems or
+provides persistence. The guest regression script is a separate root-console
+test harness, never invoked by the reader.
+
+The root-owned fixture tree is:
+
+```text
+/usr/share/iotbench/bad-sudo-rights/          root:root 0755
+├── NOTICE                                 0644; exact warning above
+├── ground-truth.json                      0644; label, paths, user and signal
+├── test-guest.sh                          0644; explicit sh invocation for testing
+├── data/                                  0755; intended allowed directory
+│   └── status.conf                        0644; synthetic public status
+└── private/                               0700
+    └── root-only.conf                     0600; fake protected marker
+```
+
+Before opening a supplied path the privileged reader calls `chroot()` to this
+synthetic tree and `chdir("/")`. This is a lab containment boundary around both
+`data/` and `private/`; it deliberately leaves traversal across the **intended
+data-directory authorization boundary** possible. Even repeated `../` cannot
+read the guest's actual `/etc/passwd`, other firmware system files, or host
+files. The tree has no mounts or symlinks and is not writable by `fixturetest`.
+Failure to enter containment fails closed. Target symlinks, directories, special
+files, extra arguments and oversized paths are rejected. No real secrets or
+credentials are installed in the tree. NOTICE is also appended to `/etc/motd` by
+`iotbench-bad-sudo-rights.inc` for every fixture image.
+
+This differs from generic vulnerable Java/JAR applications: no Java runtime or
+JAR is involved. It differs from generic vulnerable C binaries: this C reader is
+the specific command in a real installed sudo policy, with a non-privileged
+caller and root-only synthetic target. It differs from ordinary non-privileged
+Path Traversal examples: direct access fails for `fixturetest`, while the same
+traversal succeeds with `READER_EUID=0` only through the granted sudo operation.
+The evidence must include the sudo rule, helper input-to-open flow and
+protected-file permissions; a `../` string alone is insufficient.
+
+### Shared build and local testing procedure
+
+From the repository root, parse recipes and resolve one dependency graph:
+
+```bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe022-bad-sudo-rights'
+```
+
+Build every fixture using the existing exporter:
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe022-bad-sudo-rights.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+The normal default is `qemuarm64`. Set `YOCTO_MACHINE` at both build and boot
+time for `qemuarm`, `qemux86-64`, `qemux86` or `qemumips`. Exports contain the
+kernel and compressed ext4 rootfs under the firmware directories below.
+`scripts/build-all.sh` discovers these recipes automatically.
+
+For interactive verification boot a fixture with its per-device command below,
+log into the guest serial console using the existing development root account
+from the README, and run its guest test command. Expected: five `PASS` lines and
+exit status zero. The test verifies a non-root caller, direct private-file read
+denial, direct helper denial, normal sudo reading, two traversal variants, root
+effective UID, denial of other sudo commands/direct private paths, argument
+count, regular-file handling, missing files, shell-shaped filenames, and failure
+to escape the synthetic containment root. All reads remain synthetic.
+
+To see the decisive read manually **inside the guest**:
+
+```bash
+sudo -n -u fixturetest -- cat /usr/share/iotbench/bad-sudo-rights/private/root-only.conf
+# Expected: Permission denied, nonzero exit status.
+sudo -n -u fixturetest -- sudo -n /usr/bin/iotbench-maintenance-read \
+  /usr/share/iotbench/bad-sudo-rights/data/../private/root-only.conf
+# Expected: READER_EUID=0 and ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED.
+```
+
+The outer sudo is root's lab harness for changing identity. The inner sudo is
+the vulnerable authorization boundary. Do not install this sudo policy or run
+the reader with privileges on the host.
+
+The dependency-free POSIX host runner boots a fresh disposable QEMU snapshot,
+uses the existing serial login, checks the warning and expected device class,
+and runs the installed guest regression without enabling SSH:
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --all
+# Optional Apple Silicon acceleration and unused host ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-bad-sudo-rights.py --all
+```
+
+One image runs at a time. The runner always uses disposable snapshots and logs
+the console to the path printed for each device. QEMU and `zstd` must already be
+installed. Device-native services remain supplied by their usual device profile;
+no new network listener or service sandbox relaxation is part of this fixture.
+
+### Safe remediation shared by all devices
+
+Remove the wildcard sudo grant, or authorize only an exact fixed synthetic
+filename (e.g. the absolute `data/status.conf` path). Avoid giving a privileged
+reader general path arguments when an operation identifier will suffice. If path
+input is required, enforce the intended directory inside the helper: open
+relative to a trusted directory descriptor, reject traversal/absolute paths, and
+use resolution controls that prevent symlink escape and races. A plain lexical
+prefix check is insufficient. Drop unnecessary privileges and retain the outer
+lab containment boundary. After rebuilding a corrected variant, the valid
+data-file test should succeed while traversal returns a nonzero status without
+the protected marker. The vulnerable fixture's positive traversal test must then
+fail. Guest snapshot edits are discarded on exit.
+
+### Completed validation
+
+On 2026-10-06, all eleven `qemuarm64` fixtures passed BitBake recipe parsing,
+dependency resolution, actual compilation and export. Each image booted in
+QEMU with HVF and the host CPU and passed the guest regression (five PASS lines).
+Testing used disposable snapshots and host ports HTTP `18080`, MQTT `21883`
+and Modbus `11502`; the vulnerability was exercised through the serial console.
+
+Offline `debugfs` inspection of every exported ext4 image confirmed the exact
+sudo policy, locked UID/GID 994 account, root-owned `0755` helper (no setuid
+bit), `0440` sudoers file, `0700` private directory, `0600` synthetic target,
+ground-truth metadata, device identity and required NOTICE/login banner.
+Manifests contained exactly one vulnerability package,
+`cwe022-bad-sudo-rights`. The compiled helper bytes were identical across all
+images.
+
+The [local validation report](../deploy-images/bad-sudo-rights-qemuarm64-validation.txt)
+records results, kernel/rootfs/helper SHA-256 checksums and guest console
+evidence. Console logs are also saved alongside each exported image as
+`validation-console.log`. Other supported architectures have not been built
+or boot-tested in this run. Static-analysis entries above describe expected
+ground truth; completed validation used build checks, filesystem inspection
+and actual sudo execution.
+
+### doorlock-cwe022-bad-sudo-rights
+
+Simulated device: **access-control door lock**, preserving its existing MQTT
+lock telemetry and `meta-iotbench/recipes-devices/doorlock/` profile. The
+firmware recipe is
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/doorlock-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=doorlock-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=doorlock-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh doorlock
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device doorlock
+```
+
+### envsensor-cwe022-bad-sudo-rights
+
+Simulated device: **environmental sensor**, preserving its existing MQTT
+environmental telemetry and `meta-iotbench/recipes-devices/envsensor/` profile.
+The firmware recipe is
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/envsensor-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=envsensor-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=envsensor-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh envsensor
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device envsensor
+```
+
+### healthmonitor-cwe022-bad-sudo-rights
+
+Simulated device: **health monitor**, preserving its existing MQTT synthetic
+health telemetry and `meta-iotbench/recipes-devices/healthmonitor/` profile. The
+firmware recipe is
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe022-bad-sudo-rights.bb`;
+the exported firmware directory is
+`deploy-images/healthmonitor-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=healthmonitor-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh healthmonitor
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device healthmonitor
+```
+
+### ipcamera-cwe022-bad-sudo-rights
+
+Simulated device: **surveillance IP camera**, preserving its existing HTTP
+snapshot/MJPEG simulation and `meta-iotbench/recipes-devices/ipcamera/` profile.
+The firmware recipe is
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/ipcamera-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=ipcamera-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh ipcamera
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device ipcamera
+```
+
+### plc-cwe022-bad-sudo-rights
+
+Simulated device: **industrial PLC gateway (OT)**, preserving its existing
+Modbus/TCP peripheral registers and `meta-iotbench/recipes-devices/plc/`
+profile. The firmware recipe is
+`meta-iotbench/recipes-images/iotbench-plc-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/plc-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=plc-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=plc-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh plc
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device plc
+```
+
+### router-cwe022-bad-sudo-rights
+
+Simulated device: **network gateway/router**, preserving its existing shared
+HTTP administration and `meta-iotbench/recipes-devices/router/` profile. The
+firmware recipe is
+`meta-iotbench/recipes-images/iotbench-router-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/router-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=router-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=router-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh router
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device router
+```
+
+### smartbulb-cwe022-bad-sudo-rights
+
+Simulated device: **lighting smart bulb**, preserving its existing MQTT lighting
+telemetry and `meta-iotbench/recipes-devices/smartbulb/` profile. The firmware
+recipe is
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/smartbulb-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=smartbulb-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh smartbulb
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device smartbulb
+```
+
+### smarthub-cwe022-bad-sudo-rights
+
+Simulated device: **controller/smart hub**, preserving its existing MQTT hub
+telemetry and `meta-iotbench/recipes-devices/smarthub/` profile. The firmware
+recipe is
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/smarthub-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=smarthub-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=smarthub-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh smarthub
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device smarthub
+```
+
+### smartplug-cwe022-bad-sudo-rights
+
+Simulated device: **energy-management smart plug**, preserving its existing MQTT
+power telemetry and `meta-iotbench/recipes-devices/smartplug/` profile. The
+firmware recipe is
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe022-bad-sudo-rights.bb`; the
+exported firmware directory is
+`deploy-images/smartplug-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=smartplug-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=smartplug-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh smartplug
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device smartplug
+```
+
+### smartspeaker-cwe022-bad-sudo-rights
+
+Simulated device: **audio/voice-assistant smart speaker**, preserving its
+existing MQTT audio telemetry and `meta-iotbench/recipes-devices/smartspeaker/`
+profile. The firmware recipe is
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe022-bad-sudo-rights.bb`;
+the exported firmware directory is
+`deploy-images/smartspeaker-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=smartspeaker-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh smartspeaker
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device smartspeaker
+```
+
+### thermostat-cwe022-bad-sudo-rights
+
+Simulated device: **climate-control thermostat**, preserving its existing MQTT
+climate telemetry and `meta-iotbench/recipes-devices/thermostat/` profile. The
+firmware recipe is
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe022-bad-sudo-rights.bb`;
+the exported firmware directory is
+`deploy-images/thermostat-cwe022-bad-sudo-rights/<machine>/`.
+
+Relevant files: `/etc/sudoers.d/iotbench-maintenance`, the privileged
+`/usr/bin/iotbench-maintenance-read`, and `NOTICE`, `ground-truth.json`,
+`test-guest.sh`, `data/status.conf` and `private/root-only.conf` under
+`/usr/share/iotbench/bad-sudo-rights/`. The sudoers rule grants the locked
+non-root `fixturetest` account `(root) NOPASSWD` execution of that reader with
+`/usr/share/iotbench/bad-sudo-rights/data/*` arguments only. The intended
+allowed directory is `/usr/share/iotbench/bad-sudo-rights/data/`.
+
+Path validation is intentionally missing in `maintenance-read.c` between its
+lexical prefix check and `open()`: `data/../private/root-only.conf` is not
+canonicalized or confined to `data/`. The sudo wildcard accepts that path, and
+sudo elevates the helper to root, allowing it to read the synthetic `0600` file
+in the `0700` private directory that `fixturetest` cannot read directly. The
+helper's outer chroot keeps every read within the synthetic tree.
+
+Expected static-analysis finding: correlate the wildcard sudo grant, root
+execution, unvalidated path argument reaching `open()`, and protected-file
+permissions to identify privileged directory traversal. Expected ground-truth
+label: **CWE-22: Path Traversal reachable through an overly permissive sudo rule
+/ privileged sudo helper**. Expected runtime evidence: `READER_EUID=0` and
+`ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED`, with direct non-root access denied. Safe
+remediation: remove the wildcard grant or allow only the exact data-file
+argument, and enforce directory-relative path resolution in the helper as
+specified above.
+
+Local build and boot from the repository root:
+
+```bash
+FIRMWARE=thermostat-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=thermostat-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Local testing from the guest root serial console:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh thermostat
+```
+
+Alternatively, after building, run from the host (the runner boots the image):
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device thermostat
+```

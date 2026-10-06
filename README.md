@@ -231,6 +231,178 @@ to `127.0.0.1:30000-30009`. Use passive FTP; all forwarded ports bind to
 loopback. See [docs/luca-payloads.md](docs/luca-payloads.md#allow-anonymous-login-cwe-276)
 for configuration, payloads, expected results, verification and remediation.
 
+### Hardcoded credentials (CWE-798)
+
+Every device has a separate firmware with a **Vendor Support Backup** panel.
+Its HTTP action authenticates against username `support` and password
+`iotbench-support-2026`, embedded as plaintext PHP constants and identical in
+all eleven images. The accepted credential exports a maintenance-only backup
+stored outside the web document root, plus device identity, settings and live
+peripherals. Incorrect or missing credentials are rejected. This reproduces
+inbound authentication with a shared, unchangeable firmware credential.
+
+Each image installs only `cwe798-hardcoded-credentials` as its vulnerability
+package and retains its device's native services and simulated peripherals.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `envsensor-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `healthmonitor-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `ipcamera-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `plc-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `router-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `smartbulb-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `smarthub-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `smartplug-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `smartspeaker-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+| `thermostat-cwe798-hardcoded-credentials` | CWE-798 | Shared vendor support credential |
+
+Build, boot and verify one device:
+
+```bash
+FIRMWARE=router-cwe798-hardcoded-credentials docker compose run --rm yocto
+FIRMWARE=router-cwe798-hardcoded-credentials ./scripts/run-qemu.sh
+# Run in a second terminal while QEMU is running:
+python3 scripts/test-hardcoded-credentials.py --device router
+```
+
+Build only the eleven hardcoded-credential images (default `qemuarm64`):
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe798-hardcoded-credentials.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+`YOCTO_MACHINE` selects another supported architecture; the recipes are
+architecture-independent. Artifacts land in
+`deploy-images/<device>-cwe798-hardcoded-credentials/<machine>/` and
+`scripts/build-all.sh` discovers these images automatically. The HTTP endpoint
+is `http://127.0.0.1:8080` (`QEMU_HTTP_PORT` overrides it). This scenario uses
+the web support account; the router's two existing CWE-798 sudo scenarios have
+their own SSH entry points. See
+[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials-cwe-798)
+for credentials, extraction, API payloads, expected signals and verification.
+
+### Bad SUDO Rights — Path Traversal (CWE-22)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+These fixtures show how an unsafe sudo rule lets a non-root user read a fake
+root-only file. The same local test works on all eleven device profiles below.
+
+There are two directories under `/usr/share/iotbench/bad-sudo-rights/`:
+
+- `data/`: the directory the reader is supposed to allow.
+- `private/`: a root-owned directory with mode `0700`, containing the fake
+  `root-only.conf` file with mode `0600`. Only root can read it.
+
+The synthetic user `fixturetest` has no root privileges. Its sudo rule permits
+one specific reader to run as root with paths starting with `data/`:
+
+```sudoers
+fixturetest ALL=(root) NOPASSWD: /usr/bin/iotbench-maintenance-read /usr/share/iotbench/bad-sudo-rights/data/*
+```
+
+The mistake is that `*` also matches `../`, and the reader only checks the
+start of the path. It does not check where the path actually leads. The reader
+confines every read to the synthetic fixture tree, which contains both
+directories; it cannot read other guest or host files.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `envsensor-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `healthmonitor-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `ipcamera-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `plc-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `router-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `smartbulb-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `smarthub-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `smartplug-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `smartspeaker-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+| `thermostat-cwe022-bad-sudo-rights` | CWE-22 | Privileged sudo-helper path traversal |
+
+**Build and boot from the host**, in the repository root:
+
+```bash
+FIRMWARE=router-cwe022-bad-sudo-rights docker compose run --rm yocto
+FIRMWARE=router-cwe022-bad-sudo-rights ./scripts/run-qemu.sh
+```
+
+Skip the build command if the image is already exported. On Apple Silicon,
+prefix the boot command with `QEMU_ACCEL=hvf QEMU_CPU=host` for acceleration.
+Log into the QEMU serial console with `root` / `routeradmin`.
+
+**Example 1: direct read is denied.** Run this inside the guest:
+
+```bash
+sudo -n -u fixturetest -- cat \
+  /usr/share/iotbench/bad-sudo-rights/private/root-only.conf
+```
+
+Expected: `Permission denied` and a nonzero exit status.
+
+Here `-u fixturetest` tells sudo to run `cat` as the non-root user. It does
+not give `cat` root privileges. That user cannot enter the private directory
+or read the file. The normal filesystem permissions work correctly.
+
+**Example 2: sudo plus traversal reads the same file.** Inside the guest:
+
+```bash
+sudo -n -u fixturetest -- sudo -n /usr/bin/iotbench-maintenance-read \
+  /usr/share/iotbench/bad-sudo-rights/data/../private/root-only.conf
+```
+
+Expected output includes:
+
+```text
+READER_EUID=0
+IOTBENCH_ROOT_ONLY_MAINTENANCE=ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED
+```
+
+The first sudo switches from the root test console to `fixturetest`. The
+second sudo uses that user's rule to run the reader as root. The rule accepts
+the argument because it starts with `data/`, and its `*` matches the rest.
+The reader also accepts that prefix without resolving the path first.
+
+`../` means "go up one directory", so `data/../private/root-only.conf` leads
+to `private/root-only.conf`. When the reader opens it, the filesystem resolves
+`../` and checks the reader's privileges: it is now root (`READER_EUID=0`),
+so the read succeeds. Both examples target the same file; they use different
+execution privileges and the second bypasses the intended `data/` boundary.
+
+The vulnerability is **Path Traversal reachable through an overly permissive
+sudo rule / privileged sudo helper (CWE-22)**. Fix it by removing the wildcard
+grant or allowing only an exact filename, and checking inside the helper that
+the resolved file stays within `data/`, including protection against symlinks
+and races. All fixture data is synthetic; the reader only reads files.
+
+**Automatic testing:** from the guest root console, run:
+
+```bash
+sh /usr/share/iotbench/bad-sudo-rights/test-guest.sh router
+```
+
+Alternatively, after building, use the host runner. It boots and closes QEMU
+itself; use it separately from a manually running guest:
+
+```bash
+python3 scripts/test-bad-sudo-rights.py --device router
+# Test all eleven exported images:
+python3 scripts/test-bad-sudo-rights.py --all
+```
+
+Replace `router` with another device from the table. Every image keeps its
+existing device profile and installs only `cwe022-bad-sudo-rights` as its
+vulnerability package. Exports go to
+`deploy-images/<device>-cwe022-bad-sudo-rights/<machine>/`; `YOCTO_MACHINE`
+selects the architecture and `scripts/build-all.sh` includes these fixtures.
+See [docs/luca-payloads.md](docs/luca-payloads.md#bad-sudo-rights--path-traversal-cwe-22)
+for per-device details and completed validation.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in

@@ -1,0 +1,18 @@
+{
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "scenario": "Bad SUDO Rights — Path Traversal",
+  "ground_truth_label": "CWE-22: Path Traversal reachable through an overly permissive sudo rule / privileged sudo helper",
+  "cwe": "CWE-22",
+  "user": "fixturetest",
+  "user_uid": 994,
+  "sudo_run_as": "root",
+  "helper": "@BINDIR@/iotbench-maintenance-read",
+  "sudoers": "/etc/sudoers.d/iotbench-maintenance",
+  "allowed_directory": "@FIXTURE_ROOT@/data/",
+  "traversal_input": "@FIXTURE_ROOT@/data/../private/root-only.conf",
+  "synthetic_target": "@FIXTURE_ROOT@/private/root-only.conf",
+  "expected_signal": "ROOT_ONLY_PATH_TRAVERSAL_CONFIRMED",
+  "containment_root": "@FIXTURE_ROOT@",
+  "operation": "bounded read of a regular synthetic file",
+  "entry_point": "local fixturetest invocation through sudo; no remote interface"
+}

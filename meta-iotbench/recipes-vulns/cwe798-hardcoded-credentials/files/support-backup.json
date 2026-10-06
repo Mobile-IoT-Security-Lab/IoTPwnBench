@@ -1,0 +1,7 @@
+{
+  "backup_scope": "vendor-support-only",
+  "provisioning_profile": "factory-lab",
+  "maintenance_network": "10.42.0.0/24",
+  "diagnostic_upload_url": "https://support.example.invalid/diagnostics",
+  "inventory_reference": "IOTBENCH-SUPPORT-LAB"
+}

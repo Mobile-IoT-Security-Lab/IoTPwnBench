@@ -37,7 +37,7 @@ case "${FIRMWARE}" in
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
         EXTRA_ENDPOINT="SSH: ssh -p ${SSH_PORT} support@127.0.0.1"
         ;;
-    router-cwe798-*)
+    router-cwe798-ld-preload-sudo|router-cwe798-vi-privilege-escalation)
         SSH_PORT="${QEMU_SSH_PORT:-2222}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
         EXTRA_ENDPOINT="SSH: ssh -p ${SSH_PORT} routerweb@127.0.0.1"
