@@ -1577,3 +1577,860 @@ Alternatively, after building, run from the host (the runner boots the image):
 ```bash
 python3 scripts/test-bad-sudo-rights.py --device thermostat
 ```
+
+## Privilege Escalation Risk — Dangerous SUID Rights (CWE-250)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scope and ground truth
+
+These eleven fixtures model **Privilege escalation risk caused by dangerous SUID
+rights**. Each existing device profile is combined with only
+`cwe250-dangerous-suid-rights` as its vulnerability package, using the normal
+Yocto image, build scripts and architecture selector. The target is a dedicated
+synthetic ELF executable, `/usr/bin/iotbench-suid-fixture`, created for this
+benchmark. No existing system utility is made SUID by this scenario.
+
+The expected ground-truth label is **Privilege escalation risk caused by
+dangerous SUID rights**, classified as [CWE-250: Execution with Unnecessary
+Privileges](https://cwe.mitre.org/data/definitions/250.html). This helper needs
+no elevated privilege to print a static marker and execution identity, yet its
+installed SUID bit gives it root's effective UID when an unprivileged user
+executes it. The spreadsheet's legacy Bad SUID Rights row uses CWE-306; this
+implementation uses CWE-250 because its measured defect is unnecessary
+privilege, not an authentication function.
+
+The fixture focuses on **filesystem permissions and privilege boundaries**. It
+supplies no working privilege-escalation exploit or exploitation chain.
+Reporting effective UID 0 confirms the kernel's SUID transition for this
+harmless helper; it does not supply a privileged shell or arbitrary root
+operations. SUID alone is not evidence that every program is exploitable: this
+known-positive sample is intentionally unnecessary privilege on a synthetic
+program whose entire function is safe without it.
+
+### Installed files and behavior
+
+| Item | Installed path / value |
+| --- | --- |
+| Synthetic executable | `/usr/bin/iotbench-suid-fixture` |
+| Owner / group | `root:root`, numeric UID/GID `0:0` |
+| Permission mode | `4755`, displayed as `-rwsr-xr-x` |
+| SUID / SGID | SUID enabled (`04000`); SGID disabled |
+| Unprivileged caller | `suidfixture`, UID/GID `993:993`, no privileged supplementary groups |
+| Account state | Locked password, `/bin/false` shell, no login credentials |
+| Fixture notice | `/usr/share/iotbench/dangerous-suid-rights/NOTICE` |
+| Ground truth | `/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` |
+| Login warning | Same NOTICE appended to `/etc/motd` |
+
+The `s` in the owner's execute position means SUID is enabled together with
+owner execution permission. The group and other `r-x` permissions allow a normal
+unprivileged caller to run the helper. Its root-owned parent directories are
+traversable and not publicly writable; the helper itself is not writable by the
+fixture user. The intentionally dangerous permission is **unnecessary SUID**,
+not a writable program or a writable system directory.
+
+`iotbench-suid-fixture.c` is compiled with the standard Yocto `${CC}`,
+`${CFLAGS}` and `${LDFLAGS}`. Installation sets root ownership before applying
+`chmod 4755`, since changing ownership can clear SUID. A rootfs postprocess
+check fails image generation unless ownership and mode are exactly `0:0:4755`.
+Final ext4 inode metadata is verified separately with `debugfs`.
+
+The helper accepts no arguments and reads no stdin or filesystem files. It
+prints the warning, the fixed marker `SUID_FIXTURE_ONLY=BENIGN_IDENTITY_REPORT`,
+and its real/effective UID/GID, then exits. Additional arguments are rejected
+with status 2. It never launches another program, invokes a shell or
+interpreter, accepts commands or paths, modifies authentication files or
+sudoers, accesses host files, performs networking or provides persistence. It
+contains no credentials or secrets. The fixture adds no daemon or web module and
+keeps the device's existing native telemetry services.
+
+`util-linux-setpriv` is installed as an ordinary **non-SUID** verification
+utility with mode `0755`; it is not the benchmark target. From the existing
+guest root console it switches to the synthetic non-root UID/GID and directly
+executes the test helper. The helper itself never calls this utility. User
+creation uses Yocto's existing `useradd` class; no runtime account changes or
+additional login credentials are part of the helper.
+
+### Local build and verification
+
+From the repository root, parse and resolve one image:
+
+```bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe250-dangerous-suid-rights'
+```
+
+Build all eleven fixtures through the existing exporter:
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe250-dangerous-suid-rights.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+```
+
+The default architecture is `qemuarm64`. Other existing selectors are `qemuarm`,
+`qemux86-64`, `qemux86` and `qemumips`; set `YOCTO_MACHINE` consistently for
+build and boot. `scripts/build-all.sh` discovers the new recipes automatically.
+Each firmware directory below contains its compressed ext4 image and kernel.
+
+For **static verification without booting**, use the new dependency-free
+verification script on a host with Python 3, `debugfs` and `zstd`:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/router-cwe250-dangerous-suid-rights/qemuarm64/iotbench-router-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Expected: two `PASS` lines. This checks the real ext4 inode metadata and
+accessible parent directories, the locked non-root account, a dedicated ELF
+helper, matching ground truth, device identity and the warning. It does not
+mount the firmware or execute its contents on the host. Use `--debugfs` to
+specify the tool's absolute path when it is not on PATH. The existing builder
+also provides the inspection tools:
+
+```bash
+docker compose run --rm yocto python3 /scripts/test-dangerous-suid-rights.py \
+  --image /export/router-cwe250-dangerous-suid-rights/qemuarm64/iotbench-router-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+For **benign runtime verification**, boot one image with the per-device commands
+below and use its root serial console. The root login is the existing lab
+account from the README. Inspect metadata and run the helper with the normal
+non-root caller identity:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected metadata: `root:root 4755 -rwsr-xr-x`. Expected helper output:
+
+```text
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+SUID_FIXTURE_ONLY=BENIGN_IDENTITY_REPORT
+REAL_UID=993
+EFFECTIVE_UID=0
+REAL_GID=993
+EFFECTIVE_GID=993
+```
+
+The real UID identifies the non-root caller; the effective UID becomes the file
+owner's UID because SUID is enabled. The group remains the caller's group
+because SGID is disabled. Running the helper directly as root does not establish
+this boundary transition. Runtime SUID effects can be suppressed by `nosuid`
+mounts, `no_new_privs` or tracing; static metadata remains the primary finding.
+
+To automate the console checks on a POSIX host with QEMU and `zstd`:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device router
+python3 scripts/test-dangerous-suid-rights.py --all
+# Optional Apple Silicon acceleration and unused host ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-dangerous-suid-rights.py --all
+```
+
+This runner boots and closes each disposable QEMU snapshot itself. It checks
+metadata, the device profile, real/effective identities, the static marker and
+rejection of an extra argument. Console logs go to the path printed for each
+image. All helper execution takes place inside the guest.
+
+### Expected static-analysis finding and secure remediation
+
+A firmware analyzer should report the synthetic executable's root owner, execute
+bits, SUID bit and accessibility to a non-root user. Correlate those inode facts
+with the installed ground truth and the helper's lack of any need for root
+privileges. A filename or an ELF string alone is not sufficient: inspection or
+extraction must preserve numeric ownership and permission bits.
+
+Secure remediation is to install this helper as `root:root` with mode `0755`
+instead of `4755`, removing SUID while retaining normal execution. Apply the
+change in the recipe and update the intentionally vulnerable rootfs assertion
+for a corrected variant, then rebuild. No elevated capability is needed for this
+helper. In a disposable guest only, a quick comparison is:
+
+```bash
+chmod 0755 /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+The static marker should still print, but both `REAL_UID` and `EFFECTIVE_UID`
+should be `993`; metadata should read `root:root 755 -rwxr-xr-x`. The supplied
+known-positive regression should then fail its SUID assertions. Default guest
+snapshot changes are discarded; source changes and a rebuild provide the lasting
+corrected variant.
+
+### Completed validation
+
+On 2026-10-06, all eleven `qemuarm64` targets passed BitBake parsing, dependency
+resolution, actual compilation and export. Each exported image passed the
+offline verifier against its real ext4 inode metadata: the synthetic ELF
+helper was root-owned `0:0`, mode `4755`, executable by non-root callers, with
+accessible and non-writable parent directories. Account, ground-truth and
+warning checks passed for every device; the verification utility remained
+non-SUID `0755`. Both compressed and uncompressed image inspection were checked.
+
+Package manifests contained exactly one vulnerability package,
+`cwe250-dangerous-suid-rights`. Helper bytes were identical across all eleven
+images. No sudo permission rule was introduced by this scenario.
+
+Every image also booted in a disposable QEMU snapshot using HVF and the host
+CPU. The benign identity test confirmed `REAL_UID=993`, `EFFECTIVE_UID=0`,
+`REAL_GID=993`, `EFFECTIVE_GID=993`, the expected static marker, correct device
+identity and rejection of additional arguments with exit status 2. Host ports
+were HTTP `18080`, MQTT `21883` and Modbus `11502`.
+
+The [local validation report](../deploy-images/dangerous-suid-rights-qemuarm64-validation.txt)
+contains results, kernel/rootfs/helper SHA-256 checksums and console evidence.
+Each exported firmware directory also contains `validation-console.log`.
+Other supported architectures have not been built or boot-tested in this run.
+The documented analyzer finding is expected ground truth; completed validation
+used inode inspection and benign identity reporting, without an exploitation
+chain or an external firmware-analysis engine.
+
+### doorlock-cwe250-dangerous-suid-rights
+
+Simulated device: **access-control door lock**, retaining its existing MQTT lock
+telemetry and `meta-iotbench/recipes-devices/doorlock/` profile. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/doorlock-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/doorlock-cwe250-dangerous-suid-rights/qemuarm64/iotbench-doorlock-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=doorlock-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=doorlock-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/doorlock-cwe250-dangerous-suid-rights/qemuarm64/iotbench-doorlock-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device doorlock
+```
+
+### envsensor-cwe250-dangerous-suid-rights
+
+Simulated device: **environmental sensor**, retaining its existing MQTT
+environmental telemetry and `meta-iotbench/recipes-devices/envsensor/` profile.
+Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/envsensor-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/envsensor-cwe250-dangerous-suid-rights/qemuarm64/iotbench-envsensor-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=envsensor-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=envsensor-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/envsensor-cwe250-dangerous-suid-rights/qemuarm64/iotbench-envsensor-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device envsensor
+```
+
+### healthmonitor-cwe250-dangerous-suid-rights
+
+Simulated device: **health monitor**, retaining its existing MQTT synthetic
+health telemetry and `meta-iotbench/recipes-devices/healthmonitor/` profile.
+Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/healthmonitor-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/healthmonitor-cwe250-dangerous-suid-rights/qemuarm64/iotbench-healthmonitor-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=healthmonitor-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/healthmonitor-cwe250-dangerous-suid-rights/qemuarm64/iotbench-healthmonitor-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device healthmonitor
+```
+
+### ipcamera-cwe250-dangerous-suid-rights
+
+Simulated device: **surveillance IP camera**, retaining its existing HTTP
+snapshots and MJPEG streaming and `meta-iotbench/recipes-devices/ipcamera/`
+profile. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/ipcamera-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/ipcamera-cwe250-dangerous-suid-rights/qemuarm64/iotbench-ipcamera-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=ipcamera-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/ipcamera-cwe250-dangerous-suid-rights/qemuarm64/iotbench-ipcamera-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device ipcamera
+```
+
+### plc-cwe250-dangerous-suid-rights
+
+Simulated device: **industrial PLC gateway (OT)**, retaining its existing
+Modbus/TCP registers and `meta-iotbench/recipes-devices/plc/` profile. Image
+recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe250-dangerous-suid-rights.bb`.
+Firmware directory: `deploy-images/plc-cwe250-dangerous-suid-rights/<machine>/`.
+For the default machine, the rootfs is
+`deploy-images/plc-cwe250-dangerous-suid-rights/qemuarm64/iotbench-plc-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=plc-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=plc-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/plc-cwe250-dangerous-suid-rights/qemuarm64/iotbench-plc-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device plc
+```
+
+### router-cwe250-dangerous-suid-rights
+
+Simulated device: **network gateway/router**, retaining its existing shared HTTP
+administration and `meta-iotbench/recipes-devices/router/` profile. Image
+recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/router-cwe250-dangerous-suid-rights/<machine>/`. For the default
+machine, the rootfs is
+`deploy-images/router-cwe250-dangerous-suid-rights/qemuarm64/iotbench-router-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=router-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=router-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/router-cwe250-dangerous-suid-rights/qemuarm64/iotbench-router-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device router
+```
+
+### smartbulb-cwe250-dangerous-suid-rights
+
+Simulated device: **lighting smart bulb**, retaining its existing MQTT lighting
+telemetry and `meta-iotbench/recipes-devices/smartbulb/` profile. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/smartbulb-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/smartbulb-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartbulb-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=smartbulb-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/smartbulb-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartbulb-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device smartbulb
+```
+
+### smarthub-cwe250-dangerous-suid-rights
+
+Simulated device: **controller/smart hub**, retaining its existing MQTT hub
+telemetry and `meta-iotbench/recipes-devices/smarthub/` profile. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/smarthub-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/smarthub-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smarthub-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=smarthub-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=smarthub-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/smarthub-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smarthub-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device smarthub
+```
+
+### smartplug-cwe250-dangerous-suid-rights
+
+Simulated device: **energy-management smart plug**, retaining its existing MQTT
+power telemetry and `meta-iotbench/recipes-devices/smartplug/` profile. Image
+recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/smartplug-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/smartplug-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartplug-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=smartplug-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=smartplug-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/smartplug-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartplug-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device smartplug
+```
+
+### smartspeaker-cwe250-dangerous-suid-rights
+
+Simulated device: **audio/voice-assistant smart speaker**, retaining its
+existing MQTT audio telemetry and `meta-iotbench/recipes-devices/smartspeaker/`
+profile. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/smartspeaker-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/smartspeaker-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartspeaker-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=smartspeaker-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/smartspeaker-cwe250-dangerous-suid-rights/qemuarm64/iotbench-smartspeaker-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device smartspeaker
+```
+
+### thermostat-cwe250-dangerous-suid-rights
+
+Simulated device: **climate-control thermostat**, retaining its existing MQTT
+climate telemetry and `meta-iotbench/recipes-devices/thermostat/` profile. Image
+recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe250-dangerous-suid-rights.bb`.
+Firmware directory:
+`deploy-images/thermostat-cwe250-dangerous-suid-rights/<machine>/`. For the
+default machine, the rootfs is
+`deploy-images/thermostat-cwe250-dangerous-suid-rights/qemuarm64/iotbench-thermostat-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in the same directory.
+
+The relevant executable is `/usr/bin/iotbench-suid-fixture`, owned by
+**root:root (UID/GID 0:0)** with mode **4755 (`-rwsr-xr-x`)**. Its **SUID bit is
+enabled** and group/other execute bits plus traversable parents make it
+reachable by the synthetic unprivileged `suidfixture` user (UID/GID 993). The
+permission is dangerous because this harmless identity reporter receives root's
+effective UID despite needing no root privilege. It prints only the static
+fixture marker and real/effective identities, accepts no arguments and opens no
+files; it provides no exploit or command execution.
+
+Expected static finding: root ownership, executable permissions, unnecessary
+SUID and non-root accessibility at that path. Expected ground-truth label:
+**Privilege escalation risk caused by dangerous SUID rights (CWE-250)**.
+Relevant metadata and the warning are in
+`/usr/share/iotbench/dangerous-suid-rights/ground-truth.json` and `NOTICE`.
+Secure remediation: install the helper with mode **0755**, remove SUID and
+update the fixture's metadata assertion for the corrected build. Its benign
+behavior then works with the caller's effective UID.
+
+Local build and boot from the host repository root:
+
+```bash
+FIRMWARE=thermostat-cwe250-dangerous-suid-rights docker compose run --rm yocto
+FIRMWARE=thermostat-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Local static verification, without booting:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --image \
+  deploy-images/thermostat-cwe250-dangerous-suid-rights/qemuarm64/iotbench-thermostat-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Local runtime verification from the guest root console:
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+setpriv --reuid=993 --regid=993 --clear-groups /usr/bin/iotbench-suid-fixture
+```
+
+Expected: `root:root 4755 -rwsr-xr-x`, the fixed benign marker, `REAL_UID=993`
+and `EFFECTIVE_UID=0`. Alternatively, the host runner boots and verifies this
+device's exported image:
+
+```bash
+python3 scripts/test-dangerous-suid-rights.py --device thermostat
+```

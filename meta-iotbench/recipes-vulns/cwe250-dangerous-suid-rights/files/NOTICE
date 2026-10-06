@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+Scenario: Privilege Escalation Risk — Dangerous SUID Rights.
+Ground truth: unnecessary root-owned SUID executable (CWE-250).
+The helper prints only a fixed marker and execution identities. No exploit,
+shell, command execution, file access, credentials or networking is implemented.

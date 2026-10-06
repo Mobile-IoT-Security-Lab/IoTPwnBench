@@ -403,6 +403,180 @@ selects the architecture and `scripts/build-all.sh` includes these fixtures.
 See [docs/luca-payloads.md](docs/luca-payloads.md#bad-sudo-rights--path-traversal-cwe-22)
 for per-device details and completed validation.
 
+### Privilege Escalation Risk — Dangerous SUID Rights (CWE-250)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+Each device has a permissions-focused fixture containing
+`/usr/bin/iotbench-suid-fixture`, a dedicated synthetic ELF helper owned by
+`root:root` with mode **4755 (`-rwsr-xr-x`)**. The unprivileged `suidfixture`
+user (UID/GID 993) can execute it, and SUID gives the helper effective UID 0.
+The helper only prints a static marker and its execution identities; it
+accepts no arguments and opens no files. Root privilege is unnecessary for
+that behavior, so the expected finding is dangerous SUID rights / CWE-250.
+This is a known-positive permissions sample without an exploitation chain.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `envsensor-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `healthmonitor-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `ipcamera-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `plc-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `router-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `smartbulb-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `smarthub-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `smartplug-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `smartspeaker-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+| `thermostat-cwe250-dangerous-suid-rights` | CWE-250 | Unnecessary root-owned SUID helper |
+
+**Build if needed (host).** Run from the repository root. Skip this command
+if the selected image has already been exported:
+
+```bash
+FIRMWARE=router-cwe250-dangerous-suid-rights docker compose run --rm yocto
+```
+
+**Static test (host, no QEMU needed).** Read the exported image's ownership
+and permissions using the tools already available in the builder:
+
+```bash
+docker compose run --rm yocto python3 /scripts/test-dangerous-suid-rights.py \
+  --image /export/router-cwe250-dangerous-suid-rights/qemuarm64/iotbench-router-cwe250-dangerous-suid-rights-qemuarm64.rootfs.ext4.zst
+```
+
+Expected: two `PASS` lines and exit status zero. The test checks that the
+synthetic helper is owned by `root:root`, has mode `4755`, and is accessible
+to the non-root user. It also checks the fixture account, metadata and warning.
+
+**Automatic runtime test (host).** QEMU and `zstd` must be installed on the
+host. The runner boots a disposable guest, executes the benign identity
+checks, and closes QEMU itself:
+
+```bash
+QEMU_HTTP_PORT=18080 \
+  python3 scripts/test-dangerous-suid-rights.py --device router
+```
+
+Expected: `PASS router-cwe250-dangerous-suid-rights: ...` and exit status
+zero. The console log path is printed in the result. To test all eleven
+images after building them:
+
+```bash
+QEMU_HTTP_PORT=18080 QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-dangerous-suid-rights.py --all
+```
+
+On Apple Silicon, enable acceleration by adding `QEMU_ACCEL=hvf QEMU_CPU=host`
+before the host runtime command, for example:
+
+```bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  python3 scripts/test-dangerous-suid-rights.py --device router
+```
+
+**Manual test, step 1: boot on the host.** Run from the repository root:
+
+```bash
+QEMU_HTTP_PORT=18080 FIRMWARE=router-cwe250-dangerous-suid-rights \
+  ./scripts/run-qemu.sh
+```
+
+On an Apple Silicon Mac, use this command instead:
+
+```bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  FIRMWARE=router-cwe250-dangerous-suid-rights ./scripts/run-qemu.sh
+```
+
+Log into the QEMU serial console:
+
+```text
+login: root
+password: routeradmin
+```
+
+Run the remaining commands **inside the guest**, separately from the
+automatic host runner.
+
+**Step 2: inspect ownership and permissions (guest).**
+
+```bash
+stat -c '%U:%G %a %A' /usr/bin/iotbench-suid-fixture
+```
+
+Expected:
+
+```text
+root:root 4755 -rwsr-xr-x
+```
+
+The leading `4` in `4755` enables SUID. The `s` in `-rwsr-xr-x` shows that
+bit together with the owner's execute permission. The other-user `r-x`
+permissions let the synthetic non-root user read and execute the helper.
+
+**Step 3: run the helper as the unprivileged caller (guest).**
+
+```bash
+setpriv --reuid=993 --regid=993 --clear-groups \
+  /usr/bin/iotbench-suid-fixture
+```
+
+Expected output includes:
+
+```text
+SUID_FIXTURE_ONLY=BENIGN_IDENTITY_REPORT
+REAL_UID=993
+EFFECTIVE_UID=0
+REAL_GID=993
+EFFECTIVE_GID=993
+```
+
+`setpriv` switches the caller to the unprivileged user before executing the
+helper. `REAL_UID=993` proves that caller identity; `EFFECTIVE_UID=0` shows
+that SUID makes the helper run with its root owner's effective UID. The
+ordinary non-SUID `setpriv` utility is only the test harness. The group stays
+993 because this helper has no SGID bit. Running the helper directly from
+the root console would not demonstrate the non-root-to-root transition.
+
+The helper only prints these values and exits. This test demonstrates the
+unsafe permission configuration without supplying a shell or an exploitation
+chain.
+
+**Step 4 (optional): remove SUID and compare (guest).** From the guest root
+console:
+
+```bash
+chmod 0755 /usr/bin/iotbench-suid-fixture
+
+setpriv --reuid=993 --regid=993 --clear-groups \
+  /usr/bin/iotbench-suid-fixture
+```
+
+Expected output now includes:
+
+```text
+REAL_UID=993
+EFFECTIVE_UID=993
+```
+
+The same benign marker still prints. This shows that the helper does not
+need root privileges. Quit QEMU with **Ctrl-A**, then **X**; the default
+snapshot discards the permission change on exit. For a lasting fix, install
+the helper with mode `0755` in its recipe and update the intentionally
+vulnerable image's permission assertion before rebuilding.
+
+Replace `router` in the build, static-test and runtime-test commands with
+another device from the table. Use the same `YOCTO_MACHINE` for build and
+boot when selecting another architecture. `qemuarm64` is the default.
+
+All images reuse their normal device profile, install only
+`cwe250-dangerous-suid-rights` as the vulnerability package, and export to
+`deploy-images/<device>-cwe250-dangerous-suid-rights/<machine>/`.
+`YOCTO_MACHINE` selects the architecture; `scripts/build-all.sh` discovers
+these recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#privilege-escalation-risk--dangerous-suid-rights-cwe-250)
+for every device's paths, metadata, build instructions and verification.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
