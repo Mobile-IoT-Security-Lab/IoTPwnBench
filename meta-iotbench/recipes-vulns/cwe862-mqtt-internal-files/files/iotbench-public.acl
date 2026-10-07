@@ -1,0 +1,7 @@
+# Ordinary synthetic peripheral telemetry is intentionally public.
+topic read iotbench/#
+# INTENTIONAL CWE-862: internal-maintenance-only file contents are granted
+# to every anonymous subscriber, with no maintenance-role authorization.
+topic read device/config
+topic read maintenance/info
+# All other reads and ALL writes are denied by default.

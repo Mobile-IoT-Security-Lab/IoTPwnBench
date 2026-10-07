@@ -1,0 +1,5 @@
+# Firmware-local publishing only, on guest loopback port 1884.
+topic write iotbench/#
+topic write device/config
+topic write maintenance/info
+# No subscriber access or other topic writes.

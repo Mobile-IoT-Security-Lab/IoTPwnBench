@@ -60,6 +60,15 @@ case "${FIRMWARE}" in
         ;;
 esac
 
+# MQTT internal-file fixtures add a broker to HTTP and Modbus device profiles.
+case "${FIRMWARE}" in
+    router-cwe862-mqtt-internal-files|ipcamera-cwe862-mqtt-internal-files|plc-cwe862-mqtt-internal-files)
+        MQTT_PORT="${QEMU_MQTT_PORT:-1883}"
+        NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MQTT_PORT}-:1883"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}${EXTRA_ENDPOINT:+; }MQTT: 127.0.0.1:${MQTT_PORT}"
+        ;;
+esac
+
 case "${FIRMWARE}" in
     *-cwe862-coap-internal-files)
         COAP_PORT="${QEMU_COAP_PORT:-5683}"

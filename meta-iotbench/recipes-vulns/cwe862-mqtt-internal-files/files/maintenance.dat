@@ -1,0 +1,6 @@
+# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+fixture_scope=internal-maintenance-only
+fixture_marker=MQTT_INTERNAL_MAINTENANCE_EXPOSED
+maintenance_reference=synthetic-service-0042
+service_window=fixture-cycle-12
+self_test_state=synthetic-inspection-required

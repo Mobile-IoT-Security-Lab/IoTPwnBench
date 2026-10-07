@@ -736,6 +736,88 @@ clients and authorize maintenance access before opening the files. See
 [docs/luca-payloads.md](docs/luca-payloads.md#coap-server-communicating-with-vulnerable-internal-files-cwe-862)
 for the source-to-response data flow and per-device procedures.
 
+### MQTT Server Communicating with Vulnerable Internal Files (CWE-862)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+All eleven device profiles have separate firmware images that expose two
+private synthetic files through a local Mosquitto broker. A small publisher
+reads only the fixed files below and publishes their exact bytes as retained
+MQTT messages. The public ACL intentionally grants anonymous read access to
+both topics without maintenance authorization: **CWE-862 — Missing
+Authorization**, with internal-information disclosure as the consequence.
+Public writes are denied; no MQTT message can select a filesystem path.
+
+| MQTT topic | Fixed internal firmware file | Synthetic information |
+| --- | --- | --- |
+| `device/config` | `/usr/share/iotbench/mqtt-internal-files/internal/device.conf` | Device class, fake asset reference, calibration profile and diagnostic mode |
+| `maintenance/info` | `/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat` | Fake maintenance reference, service window and self-test state |
+
+The vulnerable flow is **internal synthetic file → bounded file read →
+`mosquitto_publish` → insufficiently restricted MQTT topic → anonymous
+subscriber**. Files are root:mqttfixture `0640` inside `0750`, marked
+internal-maintenance-only, and contain fixture data only. The unprivileged
+publisher connects to guest-loopback TCP 1884; anonymous subscribers use guest
+TCP 1883, forwarded only to host loopback. No external broker, MQTT credential,
+command execution or arbitrary file read is introduced. Existing device
+services remain available, and each image installs only
+`cwe862-mqtt-internal-files` as its vulnerability package.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `envsensor-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `healthmonitor-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `ipcamera-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `plc-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `router-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `smartbulb-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `smarthub-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `smartplug-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `smartspeaker-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+| `thermostat-cwe862-mqtt-internal-files` | CWE-862 | Anonymous MQTT exposure of internal synthetic files |
+
+Build and boot from the host repository root:
+
+~~~bash
+FIRMWARE=router-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=router-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+In a second host terminal, fetch the predefined topics anonymously:
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device router
+~~~
+
+Expected: exact internal config and maintenance content, including
+`MQTT_INTERNAL_CONFIG_EXPOSED`, `device_class=router` and
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED`. `QEMU_MQTT_PORT` changes the host-loopback
+TCP port; pass the matching client `--port`. Substitute any listed device.
+For automated disposable QEMU checks, separately from manual QEMU:
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --boot router
+python3 scripts/test-mqtt-internal-files.py --all
+~~~
+
+Offline inspection uses the existing builder tools:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/router-cwe862-mqtt-internal-files/qemuarm64/iotbench-router-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+Build all eleven by iterating `iotbench-*-cwe862-mqtt-internal-files.bb` as
+shown in [docs/luca-payloads.md](docs/luca-payloads.md#mqtt-server-communicating-with-vulnerable-internal-files-cwe-862).
+The existing architecture selector, export paths and `scripts/build-all.sh`
+apply. Safe remediation removes the anonymous internal-topic grants or limits
+access to authenticated, authorized maintenance subscribers. The payload guide
+contains broker/ACL/service paths, concrete file-to-publish flow, expected
+static findings and a section for each firmware.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
@@ -987,7 +1069,7 @@ them:
 | Anonymous FTP login | `127.0.0.1:2121` -> guest `:21`; passive `30000-30009` unchanged | `QEMU_FTP_PORT` (control only) |
 | TCP service injection | `127.0.0.1:9090` -> guest `:9090` | `QEMU_SERVICE_PORT` |
 | CoAP internal-file exposure | `127.0.0.1:5683` -> guest `:5683` (UDP) | `QEMU_COAP_PORT` |
-| MQTT device profiles | `127.0.0.1:1883` -> guest `:1883` | `QEMU_MQTT_PORT` |
+| MQTT device profiles and MQTT internal-file fixtures | `127.0.0.1:1883` -> guest `:1883` | `QEMU_MQTT_PORT` |
 | PLC profile | `127.0.0.1:1502` -> guest `:502` | `QEMU_MODBUS_PORT` |
 | Smart bulb ZCL parser | `127.0.0.1:17754` -> guest `:17754` | `QEMU_ZCL_PORT` |
 | Smart speaker media parser | `127.0.0.1:18000` -> guest `:18000` | `QEMU_MEDIA_PORT` |

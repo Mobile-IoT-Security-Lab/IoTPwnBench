@@ -4530,3 +4530,1040 @@ Offline verification without booting (host):
 docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
   --image /export/thermostat-cwe862-coap-internal-files/qemuarm64/iotbench-thermostat-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
+
+## MQTT Server Communicating with Vulnerable Internal Files (CWE-862)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario and authorization boundary
+
+Every implemented device profile has a separate
+`<device>-cwe862-mqtt-internal-files` image. These images reuse the existing
+Yocto image/device includes, pinned Mosquitto recipe, systemd startup,
+peripheral simulator, architecture selector and build/export scripts. Each
+installs exactly one vulnerability package, `cwe862-mqtt-internal-files`.
+The existing MQTT architecture remains a local Mosquitto broker with firmware
+publishers; the router, camera and PLC receive that same broker as a fixture
+component alongside their HTTP or Modbus service.
+
+Expected ground-truth label: **MQTT Server Communicating with Vulnerable
+Internal Files**. Expected weakness: **CWE-862 — Missing Authorization**.
+The consequence is unsafe exposure of synthetic internal firmware information.
+The finding requires all four elements: **internal firmware file + MQTT
+publisher + MQTT-accessible topic + insufficient topic access restriction**.
+An analyzer must establish their relationship; a broker, file, topic name or
+exposure marker alone is insufficient.
+
+A client reaching guest TCP `1883` connects anonymously and subscribes to
+`device/config` or `maintenance/info`. The broker's public ACL explicitly
+grants every anonymous subscriber read access to these internal-maintenance-only
+topics. It never requires a maintenance identity or role. The defect is that
+specific read grant, rather than a credential bypass or another vulnerability.
+Ordinary public peripheral telemetry remains under `iotbench/<device>/#`.
+Public MQTT writes, including writes to the internal topics, are denied.
+
+### Fixed internal files, topics and data flow
+
+| Vulnerable MQTT topic | Fixed firmware file | Synthetic contents |
+| --- | --- | --- |
+| `device/config` | `/usr/share/iotbench/mqtt-internal-files/internal/device.conf` | Device class, fake asset reference, synthetic calibration profile and diagnostic mode; `MQTT_INTERNAL_CONFIG_EXPOSED` |
+| `maintenance/info` | `/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat` | Fake maintenance reference, fixture service window and synthetic self-test state; `MQTT_INTERNAL_MAINTENANCE_EXPOSED` |
+
+Both files ship inside the firmware, contain the exact warning above, and are
+marked `fixture_scope=internal-maintenance-only`. Their contents are authored
+fixture data, with no host data, real credentials, API keys, tokens,
+certificates, personal information or external-system data. The config's
+`@DEVICE@` placeholder becomes the selected device class during the image's
+rootfs postprocessing; the maintenance file is identical across devices.
+These are private maintenance artifacts by fixture policy. Publishing them to
+arbitrary subscribers crosses that intended boundary, even though all values
+are synthetic. Unix permissions are root:mqttfixture `0640` inside a `0750`
+directory, so they are not ordinary world-readable firmware files.
+
+The concrete vulnerable flow is:
+
+~~~text
+fixed internal synthetic device.conf / maintenance.dat
+  -> mappings[] supplies a constant filename and corresponding topic
+  -> read_internal(): openat(fixed directory, constant filename), fstat, read
+  -> publish_files(): mosquitto_publish(topic, exact file bytes, QoS 1, retained)
+  -> local Mosquitto receives the publication on guest-loopback TCP 1884
+  -> public listener TCP 1883 applies iotbench-public.acl
+  -> anonymous topic read is granted without maintenance authorization
+  -> MQTT subscriber receives the internal file contents
+~~~
+
+The C source `files/iotbench-mqtt-internal-files.c` in
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/` contains the static
+`mappings[]` table. `main()` opens only the fixed internal directory and connects
+only to `127.0.0.1:1884` in the guest. `read_internal()` reads one of the two
+constant filenames; `publish_files()` passes those bytes directly to
+`mosquitto_publish()`. The publisher has no subscriptions or message callback,
+so MQTT messages cannot select filenames, paths, commands or operations.
+It publishes both files every five seconds, with retained QoS 1 messages for
+new subscribers. Retention is in broker memory, with disk persistence disabled.
+
+Expected static-analysis finding: join the image-installed private files,
+constant mappings, `openat`/`read` to `mosquitto_publish` data flow, active broker
+configuration and anonymous `topic read` grants. Identify the absent
+maintenance-role authorization before disclosure. Source annotation
+`publisher.c` and `ground-truth.json` are installed alongside the real ELF,
+configuration, ACLs and synthetic files to support firmware analysis.
+No external analysis engine is required to inspect this short chain.
+
+### Broker, startup and ACL configuration
+
+| Component | Firmware path / behavior |
+| --- | --- |
+| Local broker | `/usr/sbin/mosquitto`, from the existing pinned `mosquitto_2.1.2.bb` recipe |
+| Active broker config | `/etc/mosquitto/iotbench.conf`; public listener `0.0.0.0:1883`, private publishing listener `127.0.0.1:1884`, `per_listener_settings true`, `allow_anonymous true`, `persistence false` |
+| Public ACL | `/etc/mosquitto/iotbench-public.acl`; ordinary `topic read iotbench/#` plus **intentionally unsafe** `topic read device/config` and `topic read maintenance/info`; all writes/other reads denied by default |
+| Publishing ACL | `/etc/mosquitto/iotbench-publish.acl`; write-only access to `iotbench/#`, `device/config`, `maintenance/info`; no reads or other writes |
+| Broker startup | `/usr/lib/systemd/system/mosquitto.service.d/10-iotbench-listener.conf`; replaces `ExecStart` with `/usr/sbin/mosquitto -c /etc/mosquitto/iotbench.conf` and uses the existing `Type=simple` convention |
+| Fixture publisher | `/usr/bin/iotbench-mqtt-internal-files`; ordinary root-owned `0755`, no SUID/SGID |
+| Publisher startup | `/usr/lib/systemd/system/iotbench-mqtt-internal-files.service`; enabled at `multi-user.target`, `After`/`Requires`/`PartOf=mosquitto.service`, restart on failure |
+| Publisher identity | `mqttfixture`, locked UID/GID `991:991`, `/bin/false`, no OS login credential |
+| Native telemetry integration | `/usr/lib/systemd/system/iotbench-mqtt.service.d/10-fixture-publisher.conf`; sets `MQTT_BROKER=127.0.0.1 MQTT_PORT=1884` for existing MQTT profiles |
+| Private files | `/usr/share/iotbench/mqtt-internal-files/internal/{device.conf,maintenance.dat}`, root:991 `0640`, parent `0750` |
+| Analysis annotations | `/usr/share/iotbench/mqtt-internal-files/{publisher.c,ground-truth.json,NOTICE}`, `0644` |
+| Firmware warning | `NOTICE`, each internal file, `/etc/motd`, publisher startup log and image recipe description |
+
+Mosquitto's [ACL documentation](https://mosquitto.org/man/mosquitto-conf-5.html)
+defines the initial `topic` rules as applying to anonymous clients. Its
+[client API](https://mosquitto.org/api/files/mosquitto-h.html) supplies the
+publisher's connect/loop/publish operations. No different broker, framework or
+custom MQTT protocol implementation replaces the repository architecture.
+The recipe compiles local C sources with `${CC}`, `${CFLAGS}`, `${LDFLAGS}`
+and `-lmosquitto`, using the existing recipe dependency. No publisher or broker
+invokes a shell or package manager.
+
+The public listener is reachable only through host-loopback forwarding in
+`scripts/run-qemu.sh`. Port `1884` is bound to **guest loopback**, never forwarded,
+and has no external broker bridge. The fixed publisher client ID is only a
+protocol correlation label; ACLs do not trust it as an authentication identity.
+No MQTT username, password or shared authorization secret is introduced.
+The existing serial-console lab login belongs to the common harness and is
+unnecessary for anonymous MQTT exposure.
+
+The native telemetry script accepts `MQTT_PORT` with its existing `1883`
+default. Only these fixtures set it to `1884`, allowing the shared publisher to
+continue serving normal peripheral telemetry through the same broker while the
+public listener remains read-only. Non-MQTT profiles retain their camera/HTTP
+or Modbus services; the telemetry drop-in is inert when that unit is absent.
+
+The fixture publisher runs unprivileged, with strict filesystem protection,
+no new privileges, an empty capability set, private temporary/device namespaces,
+and loopback-only network policy. It opens the fixed directory and filenames
+with `O_NOFOLLOW`; regular-file checks and bounded reads limit each payload to
+1024 bytes. Missing, empty, symlink, non-regular or oversized files clear the
+corresponding retained message rather than expose stale data. Invalid files
+cannot redirect the read or block on a FIFO. Valid contents are read again on
+the next publishing cycle. A broker restart restarts the fixture publisher and
+repopulates both retained topics. There is no application filesystem write.
+
+### Scope and distinctions
+
+These are firmware-integrated MQTT fixtures, rather than generic Java/JAR apps
+or unrelated vulnerable C executables: Yocto installs the files, ELF, broker,
+ACLs and enabled services together in each device image. They differ from an
+ordinary MQTT broker because an actual publisher reads private firmware files
+and sends their contents to incorrectly authorized topics. They differ from
+public telemetry because both files are explicitly internal-maintenance-only.
+They differ from ordinary private files never exposed through MQTT because the
+file bytes are observable over a real MQTT subscription.
+
+They differ from Path Traversal and arbitrary file-read examples: all paths are
+implementation constants and the publisher accepts no client input. Unknown or
+path-like topics do not cause file access. They differ from command-execution
+vulnerabilities: no received command is interpreted, no shell is launched and
+no arbitrary program runs. They differ from hardcoded-credential fixtures:
+there is no MQTT credential. They differ from correctly protected MQTT topics:
+the public ACL explicitly lets anonymous clients read the internal-data topics
+without a maintenance access decision. None of the existing command-injection,
+overflow, replay, sudo or other vulnerability packages is installed.
+
+### Shared local build and testing
+
+Run from the host repository root. Default machine is `qemuarm64`; use
+`YOCTO_MACHINE` for the existing supported architecture selector.
+
+~~~bash
+# Parse the layer and resolve dependencies without compiling.
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe862-mqtt-internal-files'
+# Build and boot a fixture.
+FIRMWARE=router-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=router-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+From a second host terminal, fetch the exact internal-file content anonymously:
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+# Equivalent with locally installed Mosquitto clients; no username/password:
+mosquitto_sub -h 127.0.0.1 -p 1883 -t device/config -C 1 -W 10
+mosquitto_sub -h 127.0.0.1 -p 1883 -t maintenance/info -C 1 -W 10
+# Protocol regression against the running fixture:
+python3 scripts/test-mqtt-internal-files.py --device router
+~~~
+
+Expect the exact warning, fixture scope and exposure markers, with
+`device_class=router` on `device/config`. The Python client uses MQTT 5 without
+credentials. Regression verifies both exact payloads, wildcard access, public
+write denial with MQTT 5 `Not authorized` PUBACK (`0x87`), denial even with
+spoofed usernames, and no payloads for unknown/path-like topics. On the eight
+MQTT-native profiles it also verifies normal peripheral telemetry.
+`QEMU_MQTT_PORT` changes the loopback host TCP port; use the matching `--port`
+in the test client. Existing HTTP and PLC Modbus forwards remain available.
+
+Automatic disposable QEMU testing must run separately from manually booted QEMU:
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --boot router
+python3 scripts/test-mqtt-internal-files.py --all
+# Example on Apple Silicon, with unused host ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-mqtt-internal-files.py --all
+~~~
+
+The automatic test uses the existing serial-console harness to change only the
+synthetic internal config inside a throwaway guest snapshot. Its new probe
+bytes must appear on `device/config`, proving real file origin. It then checks
+missing/symlink/oversized/FIFO rejection and retained-data removal, restores the
+original bytes, restarts the broker, and verifies topic recovery and a
+loopback-bound publishing listener. None of these console probes is available
+through MQTT. `validation-console.log` is stored beside each export.
+The host client never scans or contacts non-loopback systems.
+
+Offline inspection, with the builder's existing `debugfs` and `zstd` tools:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/router-cwe862-mqtt-internal-files/qemuarm64/iotbench-router-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+This verifies exact device/file contents and ownership, ELF topic mappings and
+publish sink, installed analysis source/ground truth/warnings, locked service
+account, enabled startup, broker configuration, ACLs and telemetry integration.
+No host rootfs mount is needed. Build all eleven fixtures using:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe862-mqtt-internal-files.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+The existing `scripts/build-all.sh` discovers these images automatically.
+Artifacts land in `deploy-images/<device>-cwe862-mqtt-internal-files/<machine>/`.
+
+### Safe remediation
+
+Remove the public `topic read device/config` and `topic read maintenance/info`
+grants, or remove these private publications from the public broker. If
+maintenance clients need them, authenticate those clients and authorize each
+sensitive topic for a narrowly defined maintenance role. Encryption alone does
+not enforce that topic-level decision. Preserve constant filenames, bounded
+read-only behavior, unprivileged services and normal Unix file permissions.
+
+A corrected variant must deny anonymous read access to both private topics,
+continue denying public writes and unrelated reads, preserve public telemetry,
+and allow only authorized maintenance subscribers. Rebuild the image after the
+ACL/source change; disposable snapshots discard guest edits. The known-positive
+anonymous exposure assertion must fail against the corrected image.
+
+### Completed validation
+
+On 2026-10-07, all eleven `qemuarm64` fixtures built and exported successfully
+following BitBake layer parsing and a router dependency dry run. Offline
+`debugfs` inspection of every compressed ext4 image verified exact synthetic
+file contents/device identity, fixed topic/file mappings and publish sink in
+the ELF, matching installed source/ground truth, locked UID/GID 991 account,
+private `0640` files inside `0750`, enabled publisher/broker, active broker
+configuration, ACLs, telemetry drop-in and required warning. Each manifest
+contained exactly one vulnerability package, `cwe862-mqtt-internal-files`.
+The publisher ELF was identical across all eleven images.
+
+All eleven images passed in disposable QEMU snapshots with HVF/host CPU:
+anonymous exact-file reads, wildcard disclosure, public write denial with
+MQTT 5 `0x87` (also with spoofed usernames), no payloads from unknown/path-like
+topics, actual file-origin probe, missing/symlink/oversized/FIFO rejection,
+retained-content removal, original-byte restoration, broker restart and
+private listener binding. All eight MQTT-native profiles also passed peripheral
+telemetry checks. Tests used host-loopback MQTT 21883, HTTP 18080 and PLC
+Modbus 11502; no external broker or infrastructure was contacted.
+
+A separate disposable router control on host-loopback MQTT 22883 removed only
+the two anonymous internal-topic read grants. Both disclosures stopped without
+changing files or the publisher. Restoring those grants restored both exact
+payloads, corroborating the topic authorization cause and remediation.
+
+The [local validation report](../deploy-images/mqtt-internal-files-qemuarm64-validation.txt)
+records results, rootfs/kernel/manifest checksums and source/ELF SHA-256 hashes.
+Each export contains `rootfs.manifest`, `validation-console.log` and
+`validation-protocol.log`. Build, offline, runtime and remediation logs are
+under `deploy-images/mqtt-internal-files-*`. Other supported architectures were
+not built or boot-tested. No external firmware-analysis engine was run; the
+static finding remains expected ground truth supported by installed firmware
+artifacts and real MQTT behavior.
+
+### doorlock-cwe862-mqtt-internal-files
+
+Simulated device: **access-control door lock**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/doorlock/`.
+Firmware directory: `deploy-images/doorlock-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-doorlock-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/doorlock-cwe862-mqtt-internal-files/qemuarm64/iotbench-doorlock-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=doorlock`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=doorlock-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device doorlock
+~~~
+
+Expected: exact internal bytes, `device_class=doorlock` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot doorlock` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/doorlock-cwe862-mqtt-internal-files/qemuarm64/iotbench-doorlock-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### envsensor-cwe862-mqtt-internal-files
+
+Simulated device: **environmental sensor**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/envsensor/`.
+Firmware directory: `deploy-images/envsensor-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-envsensor-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/envsensor-cwe862-mqtt-internal-files/qemuarm64/iotbench-envsensor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=envsensor`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=envsensor-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device envsensor
+~~~
+
+Expected: exact internal bytes, `device_class=envsensor` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot envsensor` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/envsensor-cwe862-mqtt-internal-files/qemuarm64/iotbench-envsensor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### healthmonitor-cwe862-mqtt-internal-files
+
+Simulated device: **health monitor**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/healthmonitor/`.
+Firmware directory: `deploy-images/healthmonitor-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-healthmonitor-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/healthmonitor-cwe862-mqtt-internal-files/qemuarm64/iotbench-healthmonitor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=healthmonitor`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device healthmonitor
+~~~
+
+Expected: exact internal bytes, `device_class=healthmonitor` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot healthmonitor` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/healthmonitor-cwe862-mqtt-internal-files/qemuarm64/iotbench-healthmonitor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### ipcamera-cwe862-mqtt-internal-files
+
+Simulated device: **surveillance IP camera**, retaining existing HTTP snapshot/MJPEG stream and web admin.
+Device profile: `meta-iotbench/recipes-devices/ipcamera/`.
+Firmware directory: `deploy-images/ipcamera-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-ipcamera-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/ipcamera-cwe862-mqtt-internal-files/qemuarm64/iotbench-ipcamera-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=ipcamera`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device ipcamera
+~~~
+
+Expected: exact internal bytes, `device_class=ipcamera` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot ipcamera` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/ipcamera-cwe862-mqtt-internal-files/qemuarm64/iotbench-ipcamera-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### plc-cwe862-mqtt-internal-files
+
+Simulated device: **industrial PLC gateway**, retaining existing Modbus/TCP registers and web admin.
+Device profile: `meta-iotbench/recipes-devices/plc/`.
+Firmware directory: `deploy-images/plc-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-plc-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/plc-cwe862-mqtt-internal-files/qemuarm64/iotbench-plc-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=plc`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=plc-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device plc
+~~~
+
+Expected: exact internal bytes, `device_class=plc` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot plc` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/plc-cwe862-mqtt-internal-files/qemuarm64/iotbench-plc-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### router-cwe862-mqtt-internal-files
+
+Simulated device: **network router/gateway**, retaining existing HTTP web admin.
+Device profile: `meta-iotbench/recipes-devices/router/`.
+Firmware directory: `deploy-images/router-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-router-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/router-cwe862-mqtt-internal-files/qemuarm64/iotbench-router-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=router`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=router-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device router
+~~~
+
+Expected: exact internal bytes, `device_class=router` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot router` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/router-cwe862-mqtt-internal-files/qemuarm64/iotbench-router-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### smartbulb-cwe862-mqtt-internal-files
+
+Simulated device: **lighting smart bulb**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/smartbulb/`.
+Firmware directory: `deploy-images/smartbulb-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartbulb-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/smartbulb-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartbulb-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=smartbulb`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device smartbulb
+~~~
+
+Expected: exact internal bytes, `device_class=smartbulb` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot smartbulb` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/smartbulb-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartbulb-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### smarthub-cwe862-mqtt-internal-files
+
+Simulated device: **controller/smart hub**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/smarthub/`.
+Firmware directory: `deploy-images/smarthub-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smarthub-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/smarthub-cwe862-mqtt-internal-files/qemuarm64/iotbench-smarthub-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=smarthub`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=smarthub-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device smarthub
+~~~
+
+Expected: exact internal bytes, `device_class=smarthub` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot smarthub` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/smarthub-cwe862-mqtt-internal-files/qemuarm64/iotbench-smarthub-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### smartplug-cwe862-mqtt-internal-files
+
+Simulated device: **energy-management smart plug**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/smartplug/`.
+Firmware directory: `deploy-images/smartplug-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartplug-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/smartplug-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartplug-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=smartplug`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=smartplug-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device smartplug
+~~~
+
+Expected: exact internal bytes, `device_class=smartplug` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot smartplug` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/smartplug-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartplug-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### smartspeaker-cwe862-mqtt-internal-files
+
+Simulated device: **audio smart speaker**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/smartspeaker/`.
+Firmware directory: `deploy-images/smartspeaker-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartspeaker-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/smartspeaker-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartspeaker-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=smartspeaker`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device smartspeaker
+~~~
+
+Expected: exact internal bytes, `device_class=smartspeaker` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot smartspeaker` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/smartspeaker-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartspeaker-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+### thermostat-cwe862-mqtt-internal-files
+
+Simulated device: **climate-control thermostat**, retaining existing MQTT peripheral telemetry.
+Device profile: `meta-iotbench/recipes-devices/thermostat/`.
+Firmware directory: `deploy-images/thermostat-cwe862-mqtt-internal-files/<machine>/`.
+Image recipe: `meta-iotbench/recipes-images/iotbench-thermostat-cwe862-mqtt-internal-files.bb`.
+Default rootfs: `deploy-images/thermostat-cwe862-mqtt-internal-files/qemuarm64/iotbench-thermostat-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst`;
+`Image` is exported alongside it.
+
+Relevant implementation: shared package
+`meta-iotbench/recipes-vulns/cwe862-mqtt-internal-files/`, with the local
+Mosquitto broker and `/usr/bin/iotbench-mqtt-internal-files` publisher.
+Active config `/etc/mosquitto/iotbench.conf` loads the public read ACL
+`/etc/mosquitto/iotbench-public.acl` on guest TCP 1883 and local write ACL
+`/etc/mosquitto/iotbench-publish.acl` on guest-loopback TCP 1884.
+Startup uses `iotbench-mqtt-internal-files.service` and the
+`mosquitto.service.d/10-iotbench-listener.conf` drop-in under
+`/usr/lib/systemd/system/`. The publisher runs as locked `mqttfixture` UID/GID
+991; the existing telemetry drop-in is described in the shared configuration.
+Source annotation, ground truth and NOTICE are under
+`/usr/share/iotbench/mqtt-internal-files/`.
+
+Static mapping: `device/config` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/device.conf`, containing
+`device_class=thermostat`, a fake asset reference, calibration profile and diagnostic
+mode. `maintenance/info` exposes
+`/usr/share/iotbench/mqtt-internal-files/internal/maintenance.dat`, containing
+a synthetic maintenance reference, service window and self-test state.
+Both files are internal-maintenance-only, root:mqttfixture `0640` inside `0750`.
+They should require maintenance authorization; they are not public telemetry.
+
+Vulnerable flow: **internal synthetic file → `read_internal()` / `openat` /
+`read` → `publish_files()` / `mosquitto_publish()` → corresponding retained
+MQTT topic → anonymous subscriber allowed by public ACL**.
+The intentionally insufficient check is the unconditional anonymous read grant
+for both private topics, with no maintenance identity/role restriction.
+Expected static finding: correlate those fixed firmware files, read-to-publish
+flow and active anonymous ACL. Ground-truth label: **MQTT Server Communicating
+with Vulnerable Internal Files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove the two public read grants or authorize authenticated
+maintenance subscribers for each topic, preserving fixed read-only mapping.
+
+Local build and boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe862-mqtt-internal-files docker compose run --rm yocto
+FIRMWARE=thermostat-cwe862-mqtt-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-mqtt-internal-files.py --get device/config
+python3 scripts/test-mqtt-internal-files.py --get maintenance/info
+python3 scripts/test-mqtt-internal-files.py --device thermostat
+~~~
+
+Expected: exact internal bytes, `device_class=thermostat` and
+`MQTT_INTERNAL_CONFIG_EXPOSED` on `device/config`, plus
+`MQTT_INTERNAL_MAINTENANCE_EXPOSED` on `maintenance/info`. Use
+`python3 scripts/test-mqtt-internal-files.py --boot thermostat` separately from manual
+QEMU for file-origin, rejection and restart checks in a disposable snapshot.
+To inspect this firmware offline:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
+  --image /export/thermostat-cwe862-mqtt-internal-files/qemuarm64/iotbench-thermostat-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
