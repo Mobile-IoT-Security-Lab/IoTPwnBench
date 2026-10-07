@@ -1,0 +1,2 @@
+SYNTHETIC_INTERNAL_FIXTURE_DATA
+fixture_scope=internal-outside-intended-data-directory

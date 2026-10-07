@@ -1,0 +1,2 @@
+SYNTHETIC_PUBLIC_FIXTURE_DATA
+fixture_scope=intended-data-directory

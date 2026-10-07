@@ -1,0 +1,5 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+Vulnerable Bash files — Path Traversal (CWE-22).
+The Bash helper concatenates a supplied path with data/ without enforcing that boundary.
+All accessible files are synthetic, confined by a fixed process jail containing data/ and internal/.
+No credentials, networking, command execution, sudo grant, SUID, or privilege gain.

@@ -818,6 +818,92 @@ access to authenticated, authorized maintenance subscribers. The payload guide
 contains broker/ACL/service paths, concrete file-to-publish flow, expected
 static findings and a section for each firmware.
 
+### Vulnerable Bash Files — Path Traversal (CWE-22)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+All eleven device profiles have a separate local Bash path-traversal fixture.
+The installed `/usr/bin/iotbench-bash-read` expects a filename relative to
+`/usr/share/iotbench/bash-path-traversal/data/`, concatenates `$1` with that fixed directory,
+and reads the result using Bash's `read` builtin and a quoted redirection.
+It intentionally performs no path normalization or boundary validation.
+`../internal/private-fixture.txt` therefore reads the synthetic internal marker
+`SYNTHETIC_INTERNAL_FIXTURE_DATA` outside the intended `data/` directory.
+
+A fixed Bash loadable builtin first confines the process to a synthetic-only
+jail and drops privileges. It receives no path input and does not enforce the
+`data/` boundary. No external or host file is reachable, even through deep
+traversal. The vulnerability is in the Bash helper; the small C shared object
+only implements process containment and has no standalone executable entry.
+The fixture adds no network service, sudo rule, SUID, credentials or command
+execution. Existing device services and peripherals come from their profiles.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `envsensor-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `healthmonitor-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `ipcamera-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `plc-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `router-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `smartbulb-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `smarthub-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `smartplug-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `smartspeaker-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+| `thermostat-cwe022-bash-path-traversal` | CWE-22 | Local Bash helper path traversal |
+
+Build and boot from the host repository root:
+
+~~~bash
+FIRMWARE=router-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=router-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Log into the guest serial console with the existing `root` / `routeradmin`
+lab login, then run **inside the guest**:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh router
+~~~
+
+Expected: public marker, then `SYNTHETIC_INTERNAL_FIXTURE_DATA`, then five
+regression `PASS` lines, each with status zero. Only the helper's own process
+is confined; it starts from the guest root test console and drops to UID/GID
+990 before reading. There is no privilege grant to unprivileged callers.
+
+Automatic disposable QEMU testing (separate from manually running QEMU):
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device router
+python3 scripts/test-bash-path-traversal.py --all
+~~~
+
+Offline verification with the existing builder tools:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/router-cwe022-bash-path-traversal/qemuarm64/iotbench-router-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Build all eleven (default `qemuarm64`):
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe022-bash-path-traversal.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+`YOCTO_MACHINE` selects the existing supported architectures;
+`scripts/build-all.sh` discovers these recipes automatically. Exports go to
+`deploy-images/<device>-cwe022-bash-path-traversal/<machine>/`. Each image
+installs only `cwe022-bash-path-traversal` as its vulnerability package.
+The exact ground-truth label is **Vulnerable Bash files — Path Traversal**.
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal-cwe-22)
+for filesystem mappings, per-device data flows, remediation and local tests.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in

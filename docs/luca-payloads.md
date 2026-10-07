@@ -5,6 +5,8 @@ payloads. See [Hardcoded credentials (CWE-798)](#hardcoded-credentials-cwe-798)
 for the shared vendor support account on all eleven devices. The separate
 [Hardcoding User Passwords](#hardcoded-credentials--hardcoding-user-passwords-cwe-798)
 fixtures model a fixed synthetic account password through local authentication.
+The [Vulnerable Bash Files — Path Traversal](#vulnerable-bash-files--path-traversal-cwe-22)
+fixtures model unvalidated local path concatenation in a firmware Bash helper.
 
 ## Weak Cipher: 3DES Device Backups
 
@@ -5566,4 +5568,1052 @@ To inspect this firmware offline:
 ~~~bash
 docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/thermostat-cwe862-mqtt-internal-files/qemuarm64/iotbench-thermostat-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+## Vulnerable Bash Files — Path Traversal (CWE-22)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario and expected ground truth
+
+The eleven `<device>-cwe022-bash-path-traversal` firmware images reuse the common image,
+existing device profiles, native services, peripheral simulator, pinned Yocto
+layers and build/export scripts. Each installs exactly one vulnerability
+package, `cwe022-bash-path-traversal`, with a local Bash helper and synthetic data.
+
+The exact expected ground-truth label is **Vulnerable Bash files — Path
+Traversal**; the weakness is **CWE-22 — Path Traversal**. The vulnerability is
+specifically **Path Traversal in a Bash firmware helper caused by concatenating
+user-controlled path input with an intended base directory without sufficient
+canonicalization or boundary validation**. The local caller controls the
+helper's first argument. No network input or additional service is needed.
+
+`/usr/bin/iotbench-bash-read` has an actual `#!/bin/bash` interpreter and an
+explicit `bash` runtime dependency. Its vulnerable flow is:
+
+~~~bash
+BASE_DIR='/usr/share/iotbench/bash-path-traversal/data/'
+INPUT="$1"
+TARGET="${BASE_DIR}${INPUT}"
+# No canonicalization, normalization or data/ boundary validation.
+while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s\n' "$line"
+done < "$TARGET"
+~~~
+
+A representative positive is:
+
+~~~text
+input "../internal/private-fixture.txt"
+→ /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ synthetic internal file read
+→ SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+The kernel resolves `data/..` to the parent directory, so `internal/` is a
+sibling of `data/`, outside the intended directory. Bash does not require the
+resolved target to stay under `BASE_DIR`. The `[[ -f "$TARGET" ]]` check only
+requires a regular file; it is not traversal validation and accepts the
+internal file. Input and redirection are quoted. Shell metacharacters in `$1`
+remain literal filename bytes, with no `eval`, command substitution on input,
+`sh -c`, arbitrary command execution or command injection. Reading and printing
+use Bash builtins, without a subprocess, writes, networking or package manager.
+
+Detection requires the complete relationship **Bash input + filesystem path
+construction + intended base directory + missing traversal validation +
+filesystem access outside that intended directory**. Merely accepting an
+argument or reading a file is insufficient. An analyzer should trace `$1` to
+`INPUT`, then `TARGET`, and to the quoted redirection / `read` sink, identify the
+absent `data/` boundary check, and correlate the sibling synthetic file.
+`ground-truth.json` records the expected finding; it is not a substitute for
+analyzing the actual installed Bash script.
+
+These fixtures differ from generic vulnerable Java/JAR applications and
+generic vulnerable C binaries because the actual vulnerable input-to-read flow
+is in a Bash helper installed in every device firmware. They differ from
+ordinary Bash scripts without attacker-controlled paths and generic fixed-name
+file readers because the first argument selects the constructed target. They
+differ from command injection and arbitrary command-execution examples because
+input is used only as a quoted filesystem path. They differ from unsafe sudo
+helper examples because no sudo rule, privileged read grant or SUID is added.
+They differ from Path Traversal in unrelated applications because the firmware
+Bash helper is the measured source and sink.
+
+### Filesystem layout and independent lab containment
+
+The repository convention is `/usr/bin` for local helpers and
+`/usr/share/iotbench/<scenario>` for local fixture assets. Sources are under
+`meta-iotbench/recipes-vulns/cwe022-bash-path-traversal/`; all local `file://` inputs
+are deterministic. No new firmware architecture or device profile is created.
+
+| Artifact | Firmware path / role |
+| --- | --- |
+| Vulnerable Bash helper | `/usr/bin/iotbench-bash-read`, root:root `0755` |
+| Intended base directory, as seen by the confined helper | `/usr/share/iotbench/bash-path-traversal/data/` |
+| Intended file, as seen by the confined helper | `/usr/share/iotbench/bash-path-traversal/data/public.txt`; `SYNTHETIC_PUBLIC_FIXTURE_DATA` |
+| Internal file, as seen by the confined helper | `/usr/share/iotbench/bash-path-traversal/internal/private-fixture.txt`; `SYNTHETIC_INTERNAL_FIXTURE_DATA` |
+| Fixed outer process root | `/usr/share/iotbench/bash-path-traversal/rootfs/` |
+| Public file in the extracted firmware | `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/data/public.txt`, root:root `0644` |
+| Internal file in the extracted firmware | `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/internal/private-fixture.txt`, root:root `0644` |
+| Safe loadable Bash builtin | `/usr/lib/iotbench/bash-path-traversal/fixture-confine.so`, root:root `0755` |
+| Analysis metadata / notice / guest regression | `ground-truth.json`, `NOTICE`, `test-guest.sh` under `/usr/share/iotbench/bash-path-traversal/` |
+| Containment source for inspection | `/usr/share/iotbench/bash-path-traversal/fixture-confine.c` |
+
+The helper first loads `fixture_confine` into the already initialized Bash
+process and invokes it with **no arguments**. The builtin enters only the
+fixed outer `rootfs/`, sets its working directory to `/`, removes supplementary
+groups, permanently drops to UID/GID `990:990` and forbids new privileges.
+No account, password, privileged login or permission grant is created. A
+non-root caller cannot perform confinement and is rejected; run tests from the
+existing guest root serial console. Partial confinement failure terminates
+the process before any user-controlled file read.
+
+This small C module has no `main()`, never reads files, never receives the
+supplied path and never constructs or validates `TARGET`. It is solely a safe
+Bash loadable confinement builtin, compiled against the pinned Bash headers
+using Yocto's normal cross compiler. It does not launch Bash or another shell;
+it executes inside the existing interpreter. Its source is installed for
+analysis. The package's MIT/GPL-compatible licensing is recorded in the recipe.
+
+The jail contains **only the two synthetic regular files and root-owned `0755`
+directories**. It has no executables, libraries, symlinks, device nodes,
+`/proc`, host mounts or system files. Bash and the builtin are loaded before
+the root change; all later operations are interpreter builtins. Even many
+`../` segments cannot leave that process root. Both synthetic files remain
+readable after dropping privileges. The word "private" describes the intended
+application directory boundary, not a root-only permissions scenario.
+
+This is containment of the entire lab, **not** enforcement of the intended
+`data/` boundary. It leaves `../internal/private-fixture.txt` vulnerable and
+adds none of the prohibited vulnerable-path mitigations: no `realpath`,
+`readlink -f`, canonical path comparison, rejection of `..`, filename allowlist
+or basename-only enforcement. The image postprocess asserts the two-file jail
+layout and ordinary permissions, and appends the exact NOTICE to `/etc/motd`.
+The helper prints the warning on each invocation. No host paths, real secrets,
+credentials, persistence or system security setting changes are part of it.
+
+### Shared local build and testing
+
+Run host commands from the repository root. Default machine: `qemuarm64`.
+Use `YOCTO_MACHINE` consistently for the existing other supported architectures.
+Parse and resolve dependencies with the existing builder:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe022-bash-path-traversal'
+~~~
+
+Build all eleven fixtures:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe022-bash-path-traversal.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+Exports use `deploy-images/<device>-cwe022-bash-path-traversal/<machine>/` and the
+existing `scripts/build-all.sh` automatically includes all new image recipes.
+For manual testing, boot the selected firmware with `scripts/run-qemu.sh` and
+log into its serial console with the common lab `root` / `routeradmin` login.
+Run only **inside the guest**:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh router
+~~~
+
+Expected: exact warning followed by public marker; then warning followed by
+internal marker; then five `PASS` lines and status zero. Missing or non-regular
+files return 1, and incorrect argument count or failed confinement returns 2.
+The guest regression verifies normal reads, two traversal spellings, argument
+counts, missing/directory paths, literal shell-shaped filenames, deep traversal
+containment and ordinary helper permissions. Its outside-jail probes reference
+only this fixture's synthetic NOTICE and data, never real system secrets.
+It checks that the jail has exactly two files and no symlinks or special files.
+The helper and regression do not mutate files.
+
+`scripts/test-bash-path-traversal.py --image <ext4-or-ext4.zst>` uses `debugfs`
+without mounting or executing the firmware. It verifies the exact installed
+Bash/source/test/metadata, actual Bash interpreter, fixed confinement ELF,
+recursive jail contents and ownership, file bytes, ancestors and warning.
+Expected: two `PASS` lines. Use the builder's installed tools as in the
+per-device commands below.
+
+For automatic disposable guest boots, separately from manually running QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device router
+python3 scripts/test-bash-path-traversal.py --all
+# Optional Apple Silicon acceleration and unused existing device-service ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-bash-path-traversal.py --all
+~~~
+
+The runner needs host QEMU and `zstd`, boots one snapshot at a time, invokes
+the regression over the serial console and closes QEMU. Logs are saved beside
+each export as `validation-console.log`. The path-traversal helper uses no
+networking; port settings support only the unchanged device profiles.
+
+### Safe remediation
+
+In a separate corrected variant, resolve the supplied path relative to a trusted
+`data/` directory and enforce that the resolved file remains inside it. Reject
+absolute paths and escaping traversal; account for symlinks and filesystem
+races, preferably using directory-relative opens with resolution constraints.
+A lexical prefix comparison alone is insufficient. Keep quoted input and
+read-only behavior, ordinary file permissions and the outer synthetic jail.
+Rebuild for a lasting variant; do not add the fix to these known-positive
+vulnerable fixtures. A corrected variant must still read `public.txt` but reject
+`../internal/private-fixture.txt` without printing the internal marker. The
+vulnerable fixture's positive traversal assertion must fail against that fix.
+
+### Completed validation
+
+On 2026-10-07, all eleven `qemuarm64` firmware fixtures built and exported
+successfully after BitBake layer parsing and a router dependency dry run.
+Every image manifest contains exactly one vulnerability package,
+`cwe022-bash-path-traversal`, plus the actual Bash runtime and its existing
+device profile. No other vulnerability package was added.
+
+Offline `debugfs` inspection of all eleven compressed ext4 exports verified
+exact installed Bash, confinement source, guest regression and ground truth;
+the fixed confinement ELF; the actual Bash interpreter; device identity;
+ordinary root:root `0755` helper/builtin permissions; root:root `0644` synthetic
+files; safe ancestor directories; recursive two-file jail contents with no
+symlinks or special files; and the required NOTICE/login warning. Installed
+Bash helper and confinement builtin bytes are identical across all images.
+
+All eleven images booted in disposable QEMU snapshots with HVF/host CPU and
+passed all five guest regression groups: intended public-file read, two `../`
+traversal spellings reading the synthetic internal marker, invalid arguments
+and literal shell-shaped filenames, deep traversal remaining inside the
+synthetic-only jail, and ordinary permissions without SUID or sudo grants.
+Tests used the local serial console and existing host-loopback device-service
+ports HTTP `18080`, MQTT `21883` and PLC Modbus `11502`. The Bash helper itself
+uses no networking and neither it nor the guest regression modifies files.
+
+The [local validation report](../deploy-images/bash-path-traversal-qemuarm64-validation.txt)
+records all 55 guest checks and compressed-rootfs/kernel/manifest/console/source
+SHA-256 checksums. Each export includes `rootfs.manifest` and
+`validation-console.log`; aggregate logs are saved under
+`deploy-images/bash-path-traversal-qemuarm64-*`. Other supported architectures
+were not built or boot-tested. No external firmware-analysis engine was run;
+the static finding is expected ground truth supported by the installed Bash
+flow and observed local traversal behavior.
+
+### doorlock-cwe022-bash-path-traversal
+
+Simulated device: **access-control door lock**, using the existing
+`meta-iotbench/recipes-devices/doorlock/` profile. Firmware directory:
+`deploy-images/doorlock-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/doorlock-cwe022-bash-path-traversal/qemuarm64/iotbench-doorlock-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=doorlock-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh doorlock
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/doorlock-cwe022-bash-path-traversal/qemuarm64/iotbench-doorlock-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device doorlock
+~~~
+
+### envsensor-cwe022-bash-path-traversal
+
+Simulated device: **environmental sensor**, using the existing
+`meta-iotbench/recipes-devices/envsensor/` profile. Firmware directory:
+`deploy-images/envsensor-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/envsensor-cwe022-bash-path-traversal/qemuarm64/iotbench-envsensor-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=envsensor-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh envsensor
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/envsensor-cwe022-bash-path-traversal/qemuarm64/iotbench-envsensor-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device envsensor
+~~~
+
+### healthmonitor-cwe022-bash-path-traversal
+
+Simulated device: **health monitor**, using the existing
+`meta-iotbench/recipes-devices/healthmonitor/` profile. Firmware directory:
+`deploy-images/healthmonitor-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/healthmonitor-cwe022-bash-path-traversal/qemuarm64/iotbench-healthmonitor-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh healthmonitor
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/healthmonitor-cwe022-bash-path-traversal/qemuarm64/iotbench-healthmonitor-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device healthmonitor
+~~~
+
+### ipcamera-cwe022-bash-path-traversal
+
+Simulated device: **surveillance IP camera**, using the existing
+`meta-iotbench/recipes-devices/ipcamera/` profile. Firmware directory:
+`deploy-images/ipcamera-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/ipcamera-cwe022-bash-path-traversal/qemuarm64/iotbench-ipcamera-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh ipcamera
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/ipcamera-cwe022-bash-path-traversal/qemuarm64/iotbench-ipcamera-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device ipcamera
+~~~
+
+### plc-cwe022-bash-path-traversal
+
+Simulated device: **industrial PLC gateway (OT)**, using the existing
+`meta-iotbench/recipes-devices/plc/` profile. Firmware directory:
+`deploy-images/plc-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/plc-cwe022-bash-path-traversal/qemuarm64/iotbench-plc-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=plc-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh plc
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/plc-cwe022-bash-path-traversal/qemuarm64/iotbench-plc-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device plc
+~~~
+
+### router-cwe022-bash-path-traversal
+
+Simulated device: **network gateway router**, using the existing
+`meta-iotbench/recipes-devices/router/` profile. Firmware directory:
+`deploy-images/router-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/router-cwe022-bash-path-traversal/qemuarm64/iotbench-router-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=router-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh router
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/router-cwe022-bash-path-traversal/qemuarm64/iotbench-router-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device router
+~~~
+
+### smartbulb-cwe022-bash-path-traversal
+
+Simulated device: **lighting controller / smart bulb**, using the existing
+`meta-iotbench/recipes-devices/smartbulb/` profile. Firmware directory:
+`deploy-images/smartbulb-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/smartbulb-cwe022-bash-path-traversal/qemuarm64/iotbench-smartbulb-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh smartbulb
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/smartbulb-cwe022-bash-path-traversal/qemuarm64/iotbench-smartbulb-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device smartbulb
+~~~
+
+### smarthub-cwe022-bash-path-traversal
+
+Simulated device: **smart-home controller / hub**, using the existing
+`meta-iotbench/recipes-devices/smarthub/` profile. Firmware directory:
+`deploy-images/smarthub-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/smarthub-cwe022-bash-path-traversal/qemuarm64/iotbench-smarthub-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=smarthub-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh smarthub
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/smarthub-cwe022-bash-path-traversal/qemuarm64/iotbench-smarthub-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device smarthub
+~~~
+
+### smartplug-cwe022-bash-path-traversal
+
+Simulated device: **energy-management smart plug**, using the existing
+`meta-iotbench/recipes-devices/smartplug/` profile. Firmware directory:
+`deploy-images/smartplug-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/smartplug-cwe022-bash-path-traversal/qemuarm64/iotbench-smartplug-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=smartplug-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh smartplug
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/smartplug-cwe022-bash-path-traversal/qemuarm64/iotbench-smartplug-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device smartplug
+~~~
+
+### smartspeaker-cwe022-bash-path-traversal
+
+Simulated device: **audio / voice-assistant speaker**, using the existing
+`meta-iotbench/recipes-devices/smartspeaker/` profile. Firmware directory:
+`deploy-images/smartspeaker-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/smartspeaker-cwe022-bash-path-traversal/qemuarm64/iotbench-smartspeaker-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh smartspeaker
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/smartspeaker-cwe022-bash-path-traversal/qemuarm64/iotbench-smartspeaker-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device smartspeaker
+~~~
+
+### thermostat-cwe022-bash-path-traversal
+
+Simulated device: **climate-control thermostat**, using the existing
+`meta-iotbench/recipes-devices/thermostat/` profile. Firmware directory:
+`deploy-images/thermostat-cwe022-bash-path-traversal/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe022-bash-path-traversal.bb`. The default export is
+`deploy-images/thermostat-cwe022-bash-path-traversal/qemuarm64/iotbench-thermostat-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` in the same directory. Its sole vulnerability package is
+`cwe022-bash-path-traversal`.
+
+Vulnerable Bash script: `/usr/bin/iotbench-bash-read`. Intended base directory
+inside the confined process: `/usr/share/iotbench/bash-path-traversal/data/`.
+Relevant synthetic files: `data/public.txt` and `internal/private-fixture.txt`
+under `/usr/share/iotbench/bash-path-traversal/` as seen by the helper; in the extracted
+firmware they are under `/usr/share/iotbench/bash-path-traversal/rootfs/usr/share/iotbench/bash-path-traversal/`.
+The internal file contains **`SYNTHETIC_INTERNAL_FIXTURE_DATA`** and is outside
+`data/`. NOTICE, ground truth and the guest test live outside the jail under
+`/usr/share/iotbench/bash-path-traversal/`.
+
+The input is the first script argument (`$1`), assigned to `INPUT`. The exact
+path construction is `TARGET="${BASE_DIR}${INPUT}"`. There is intentionally no
+canonicalization, normalization or intended-directory validation between this
+assignment and `done < "$TARGET"`. The benign read-only operation is a Bash
+`read -r` loop that prints each line with `printf`. `[[ -f ]]` only checks file
+type; it does not restrict the path to `data/`.
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+$1 = "../internal/private-fixture.txt" → INPUT
+→ TARGET = /usr/share/iotbench/bash-path-traversal/data/../internal/private-fixture.txt
+→ quoted Bash input redirection / read builtin
+→ synthetic internal file read: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+`data/..` resolves to its parent, so `internal/` escapes the intended base.
+Expected finding: **CWE-22**, correlate Bash-controlled path construction with
+the missing `data/` boundary check and reachable sibling file. Expected exact
+ground-truth label: **Vulnerable Bash files — Path Traversal**. The fixed
+input-independent jail contains the lab as a whole while preserving this escape.
+Safe remediation: enforce resolved containment inside `data/`, including
+symlink/race protection, preserve quoting and outer confinement, and verify
+public reads still work while traversal is rejected.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe022-bash-path-traversal docker compose run --rm yocto
+FIRMWARE=thermostat-cwe022-bash-path-traversal ./scripts/run-qemu.sh
+~~~
+
+Local test, inside this guest's root serial console:
+
+~~~bash
+iotbench-bash-read public.txt
+iotbench-bash-read '../internal/private-fixture.txt'
+sh /usr/share/iotbench/bash-path-traversal/test-guest.sh thermostat
+~~~
+
+Expected: public marker, internal marker, then five `PASS` lines; zero status.
+No host or real system file is used. Offline verification (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-bash-path-traversal.py \
+  --image /export/thermostat-cwe022-bash-path-traversal/qemuarm64/iotbench-thermostat-cwe022-bash-path-traversal-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Automatic disposable guest test, separately from
+manual QEMU:
+
+~~~bash
+python3 scripts/test-bash-path-traversal.py --device thermostat
 ~~~
