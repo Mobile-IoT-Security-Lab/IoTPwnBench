@@ -3398,3 +3398,1135 @@ close this image separately from a manually running guest:
 ~~~bash
 python3 scripts/test-hardcoded-user-passwords.py --device thermostat
 ~~~
+
+
+## CoAP Server Communicating with Vulnerable Internal Files (CWE-862)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario, authorization boundary and ground truth
+
+The eleven `<device>-cwe862-coap-internal-files` images reuse the existing
+device profiles, common Yocto image, pinned layers, systemd startup conventions,
+architecture selector and build/export scripts. Each installs exactly one
+vulnerability package, `cwe862-coap-internal-files`. The repository had no
+CoAP-specific fixture; the existing `meta-networking` layer already supplies
+the pinned `libcoap` recipe used by this firmware-integrated daemon.
+
+The expected ground-truth label is **CoAP server communicating with vulnerable
+internal files**. The modeled vulnerability is specifically **unsafe exposure
+of synthetic internal firmware files through a CoAP server because the CoAP
+resource lacks adequate access control**. We classify the absent resource
+authorization as [CWE-862 — Missing Authorization](https://cwe.mitre.org/data/definitions/862.html);
+disclosure of internal information is its consequence, not a second fixture
+vulnerability. There is no credential or authentication-bypass chain.
+
+The attacker position is a CoAP client that can reach guest UDP port `5683`.
+The normal host runner forwards it only through `127.0.0.1`. A request without
+any identity, credential, session or maintenance role receives the internal
+file bytes. CoAP message tokens correlate requests and responses; they do not
+authenticate the client.
+
+### Resource-to-file mappings and intended privacy
+
+All application file access is restricted to this predefined mapping:
+
+| CoAP GET resource | Fixed internal firmware file | Synthetic contents / exposure signal |
+| --- | --- | --- |
+| `/device/config` | `/usr/share/iotbench/coap-internal-files/internal/device.conf` | Device class, fake asset reference, calibration profile and diagnostic mode; `COAP_INTERNAL_CONFIG_EXPOSED` |
+| `/maintenance/info` | `/usr/share/iotbench/coap-internal-files/internal/maintenance.dat` | Fake maintenance reference, service window and self-test state; `COAP_INTERNAL_MAINTENANCE_EXPOSED` |
+
+Both files are shipped in the firmware, marked `fixture_scope=internal-maintenance-only`,
+and contain the exact fixture warning. They contain no host data, real credentials,
+API keys, tokens, personal data or external-system information. They are internal
+maintenance/configuration artifacts by fixture policy, rather than intentionally
+public telemetry. Normal Unix permissions restrict their direct access to root
+and the daemon's service group, but the protocol handler omits the maintenance
+authorization boundary before returning them to any reachable client.
+
+The source `files/device.conf` has an `@DEVICE@` placeholder. The image-only
+`iotbench-coap-internal-files.inc` replaces it with the profile's existing
+`IOTBENCH_DEVICE` at build time, checks ownership/permissions and appends NOTICE
+to `/etc/motd`. This creates deterministic per-device synthetic configuration.
+`maintenance.dat` and daemon code are identical across the eleven images.
+There is no runtime file generation or mutation by the service.
+
+### Server implementation, startup and static data flow
+
+The source directory is
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`. Its recipe uses local
+`file://` sources and standard `${CC}`, `${CFLAGS}` and `${LDFLAGS}` with
+`pkg-config --cflags --libs libcoap-3-openssl`. The existing pinned
+`libcoap_4.3.5b.bb` provides RFC 7252 CoAP framing, URI matching and responses;
+the daemon creates only an IPv4 UDP endpoint. No DTLS/TCP service, external
+client connection, scan, shell or command execution is configured. See
+[RFC 7252](https://www.rfc-editor.org/rfc/rfc7252.html) and the
+[libcoap handler API](https://libcoap.net/doc/reference/4.3.5/man_coap_handler.html).
+
+The static data flow is:
+
+~~~text
+CoAP GET /device/config or /maintenance/info
+  -> libcoap matches an explicitly registered resource
+  -> get_internal_file(resource)
+  -> resource userdata selects a constant filename from resources[]
+  -> openat(pre-opened fixed internal directory, constant filename, O_RDONLY)
+  -> fstat and bounded read into content[]
+  -> coap_add_data(response, byte_count, content)
+  -> libcoap sends 2.05 Content with the internal file bytes
+~~~
+
+The `resources[]` table in `iotbench-coap-internal-files.c` fixes both URI and
+filename; `coap_resource_set_userdata` ties each resource to its mapping.
+`coap_register_request_handler(..., COAP_REQUEST_GET, get_internal_file)`
+registers the only application operation. `main` opens the fixed internal
+directory once. Inside `get_internal_file`, `openat` opens the mapped file and
+`read` supplies the bytes later passed to `coap_add_data`. The handler sets
+`COAP_RESPONSE_CODE_CONTENT`; libcoap transmits the response when it returns.
+The installed source annotation `handler.c` accompanies the executable to make
+this short flow directly available to static-analysis tools.
+
+The intentionally missing check is **authorization of the requesting client
+for internal maintenance-file access before `openat`/`read`**. Checking the
+file's type or the URI syntax is not an authorization check. A static analyzer
+should correlate the registered CoAP handlers, constant internal files,
+read-to-response data flow and absence of that access decision.
+
+| Component | Firmware path / permissions |
+| --- | --- |
+| Daemon | `/usr/bin/iotbench-coap-internal-files`, root:root `0755`, no SUID/SGID |
+| Startup | `/usr/lib/systemd/system/iotbench-coap-internal-files.service`; enabled for `multi-user.target` |
+| Service identity | `coapfixture`, UID/GID `992:992`, locked password and `/bin/false` shell |
+| Internal directory | `/usr/share/iotbench/coap-internal-files/internal/`, root:coapfixture `0750` |
+| Internal files | `device.conf` and `maintenance.dat`, root:coapfixture `0640` |
+| Analysis source | `/usr/share/iotbench/coap-internal-files/handler.c`, `0644` |
+| Ground truth | `/usr/share/iotbench/coap-internal-files/ground-truth.json`, `0644` |
+| Warning | `/usr/share/iotbench/coap-internal-files/NOTICE` and `/etc/motd` |
+
+Yocto's existing `useradd` and `systemd` classes install the locked service
+identity and enable startup. The unit uses `Type=simple`,
+`ExecStart=/usr/bin/iotbench-coap-internal-files`, `User=coapfixture`,
+`Group=coapfixture` and `After=network.target`. It retains strict filesystem
+protection, no new privileges, an empty capability set, private temporary/device
+namespaces and restricted socket families. The daemon prints the exact warning
+when starting. UDP port 5683 needs no privileged capability; no sudo rule or
+OS login credential is introduced.
+
+### Read-only scope and distinctions
+
+The daemon rejects query strings and request bodies with `4.00 Bad Request`.
+Unknown resource URIs return `4.04 Not Found`; unregistered write methods such
+as POST, PUT and DELETE return `4.05 Method Not Allowed`. Request URIs, query
+strings and payloads never become filenames or path fragments. The two fixed
+files are opened with `O_NOFOLLOW` and `O_NONBLOCK`, checked as regular files,
+and read with a maximum of 512 bytes. Missing files, symlinks, empty files and
+oversized/non-regular files fail with `5.00 Internal Server Error`.
+There is no application access to other files or any write operation. Libcoap's
+standard resource discovery may list the registered URIs; it does not expose
+additional internal files.
+
+This fixture differs from generic vulnerable Java/JAR applications: none is
+installed. It differs from a generic vulnerable C binary unrelated to firmware:
+this executable is a real systemd-started CoAP service linked to actual
+image-installed files. It differs from ordinary CoAP serving intentionally
+public information: these files are explicitly internal-maintenance-only.
+It differs from a generic network service because the request/resource/response
+is CoAP, backed by libcoap rather than a custom line protocol.
+
+It differs from Path Traversal and arbitrary file-read examples: clients select
+only registered resources, never filesystem paths, and cannot escape the
+predefined mapping. It differs from command-execution vulnerabilities because
+the handler performs only bounded reads and response construction. It differs
+from hardcoded-credential fixtures because this service contains no login
+password or shared authorization secret. It also differs from ordinary internal
+files never reachable through a protocol handler: here a CoAP GET actually
+returns those file bytes.
+
+**A CoAP server merely existing is not sufficient. An internal file merely
+existing is not sufficient.** The finding requires a demonstrable relationship:
+**a CoAP-accessible resource exposes information originating from a predefined
+internal firmware file without appropriate access restrictions**. A resource
+name, marker string or metadata label alone does not establish the vulnerability.
+
+### Local build and manual testing
+
+Run host commands from the repository root. Validate the layer and one graph:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe862-coap-internal-files'
+~~~
+
+Build all eleven using the normal exporter:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe862-coap-internal-files.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+The default is `qemuarm64`. The existing `YOCTO_MACHINE` selector also supports
+`qemuarm`, `qemux86-64`, `qemux86` and `qemumips`; use the same selector for
+build and boot. `scripts/build-all.sh` discovers all these recipes automatically.
+Outputs go to `deploy-images/<device>-cwe862-coap-internal-files/<machine>/`.
+
+Boot a selected image with its per-device command below. On Apple Silicon add
+`QEMU_ACCEL=hvf QEMU_CPU=host`. The host forwards
+`127.0.0.1:5683/udp` to guest `5683/udp`; `QEMU_COAP_PORT` changes only the
+host UDP port. Existing HTTP/MQTT/Modbus profile forwarding is retained.
+For a complete manual router example on Apple Silicon, run this on the host
+from the repository root (skip rebuilding if the image is already exported):
+
+~~~bash
+FIRMWARE=router-cwe862-coap-internal-files docker compose run --rm yocto
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 QEMU_COAP_PORT=5683 \
+  FIRMWARE=router-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Wait until the QEMU console shows `login:`. The startup output must include
+`CoAP: coap://127.0.0.1:5683`. No guest login is needed for a CoAP request.
+Use a second host terminal for these manual reads:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` followed by the exact internal file content and the
+corresponding `COAP_INTERNAL_CONFIG_EXPOSED` or
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` line. No credentials or role are supplied.
+These are CoAP/UDP endpoints; an HTTP browser or ordinary HTTP curl request does
+not exercise them. If using host UDP port 15683, add `--port 15683` to every
+client command. The standard-library client only contacts host loopback and
+does not discover or scan other machines.
+
+From the guest's root serial console (existing `root` / `routeradmin`
+development login), inspect the source of those same bytes and service:
+
+~~~bash
+systemctl status iotbench-coap-internal-files.service --no-pager
+cat /usr/share/iotbench/coap-internal-files/internal/device.conf
+cat /usr/share/iotbench/coap-internal-files/internal/maintenance.dat
+~~~
+
+Compare the file contents with the CoAP response. This inspection is evidence
+of file origin; root login is not required by the CoAP request.
+
+#### Manual file-origin check in a disposable snapshot
+
+After logging into the guest serial console, append one synthetic line
+**inside the guest**:
+
+~~~bash
+printf '%s\n' 'fixture_probe=manual-test' >> /usr/share/iotbench/coap-internal-files/internal/device.conf
+~~~
+
+Then repeat the request **from the host terminal**:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+~~~
+
+The `2.05 Content` response must now include `fixture_probe=manual-test`.
+This proves that the response originates from the current internal file rather
+than an unused string or fixed response literal. Quit QEMU with **Ctrl-A**, then
+**X**; the normal disposable snapshot discards this test edit.
+
+#### Connection refused: match the forwarded UDP port
+
+`ConnectionRefusedError: [Errno 61] Connection refused` can occur when the
+client uses a host UDP port that QEMU is not forwarding. Check the
+`CoAP: coap://127.0.0.1:<port>` line printed when QEMU starts.
+
+For example, if QEMU was started without `QEMU_COAP_PORT`, its default host
+port is **5683**, so the working commands are:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Using `--port 15683` against that instance will not reach the server. To use
+15683, first quit QEMU and restart it with `QEMU_COAP_PORT=15683`, then use
+`--port 15683` in every host client command. Changing a shell variable after
+QEMU has started does not change the existing forwarding.
+
+If the port matches but the server still does not respond, inspect
+`systemctl status iotbench-coap-internal-files.service --no-pager` inside the
+guest and confirm that the selected firmware is `router-cwe862-coap-internal-files`
+(or another device's matching CoAP fixture).
+
+### Automated local verification and remediation
+
+Against an already running fixture, use the per-device `--device` command.
+Expected: two `PASS` lines. It checks exact unauthenticated file exposure with
+CON and NON messages, repeated GETs, correct tokens/message IDs/Content-Format,
+and rejection of unknown/path-shaped URIs, queries, request bodies and write
+methods without changing either file.
+
+Use `--boot <device>` or `--all` separately from manual QEMU to let the runner
+boot/test/close disposable snapshots. Expected: three `PASS` lines per image.
+It also checks the enabled service, identity, warning and file metadata, then
+temporarily changes only the synthetic internal configuration file inside the
+disposable guest. The changed content must appear over CoAP, proving the actual
+file-read-to-response relationship. Missing, symlink and oversized internal
+files must fail closed; the original bytes are restored. No host file is
+modified or exposed.
+
+~~~bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 QEMU_COAP_PORT=15683 \
+  python3 scripts/test-coap-internal-files.py --all
+~~~
+
+Offline `--image` verification reads ext4 or ext4.zst via `debugfs` without
+mounting or executing it. It checks the two synthetic files, actual ELF URI/file
+mappings, installed handler source, locked unprivileged account, service/enable
+link, permissions, ground truth and warning. Use the builder commands below, or
+host Python 3 with `zstd` and `debugfs`. Expected: two `PASS` lines.
+Console evidence is saved alongside each exported image as `validation-console.log`.
+
+Safe remediation is to remove internal-file resources from the externally
+reachable CoAP interface, or establish client identity and explicitly authorize
+the maintenance role before opening the files. A secure transport such as DTLS
+can support client authentication, but transport encryption alone does not decide
+who is authorized to read each resource. Keep the constant mapping, unprivileged
+identity, bounded reads and normal filesystem permissions. A corrected variant
+should reject anonymous GETs, permit only an authorized maintenance client and
+continue rejecting unknown resources and writes. The known-positive exposure
+test must then fail its unrestricted-content assertion. Apply source changes
+and rebuild for a lasting fix; normal QEMU snapshots discard test edits.
+
+
+### Completed validation
+
+On 2026-10-07, all eleven `qemuarm64` fixtures built and exported successfully
+after BitBake parsing and a router dependency dry run. Offline `debugfs`
+inspection of every compressed ext4 export confirmed the two exact synthetic
+files and device class, fixed URI/file mappings in the ELF, matching installed
+handler source, locked UID/GID 992 daemon account, enabled systemd unit,
+`0640` internal files in a `0750` directory, ground truth and required warning.
+The daemon ELF and maintenance file were identical across all device images.
+Each package manifest contained exactly one vulnerability package,
+`cwe862-coap-internal-files`.
+
+All eleven images booted in disposable QEMU snapshots using HVF and the host
+CPU. Every image passed unauthenticated CON/NON GET checks with exact file
+bytes, repeated requests and the normal rejection controls. A temporary change
+to the actual internal synthetic configuration appeared in the CoAP response,
+demonstrating file origin. Missing, symlink and oversized files were rejected;
+the original content was restored. All CoAP requests targeted host loopback
+UDP 15683, forwarded to guest UDP 5683.
+
+The [local validation report](../deploy-images/coap-internal-files-qemuarm64-validation.txt)
+records results, source/file-origin evidence and rootfs/kernel/daemon/file
+SHA-256 checksums. Every export includes `rootfs.manifest`,
+`validation-console.log` and `validation-protocol.log`. Build logs are saved
+as `deploy-images/coap-internal-files-qemuarm64-build.log` and
+`deploy-images/coap-internal-files-qemuarm64-parse-and-initial-build.log`.
+Other supported architectures were not built or boot-tested in this run.
+No external firmware-analysis engine was run; static findings remain expected
+ground truth corroborated by real firmware files and protocol behavior.
+
+### doorlock-cwe862-coap-internal-files
+
+Simulated device: **access-control door lock**, reusing
+`meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
+`deploy-images/doorlock-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/doorlock-cwe862-coap-internal-files/qemuarm64/iotbench-doorlock-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=doorlock`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=doorlock-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=doorlock` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device doorlock`.
+Alternatively, use `--boot doorlock` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/doorlock-cwe862-coap-internal-files/qemuarm64/iotbench-doorlock-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### envsensor-cwe862-coap-internal-files
+
+Simulated device: **environmental sensor**, reusing
+`meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
+`deploy-images/envsensor-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/envsensor-cwe862-coap-internal-files/qemuarm64/iotbench-envsensor-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=envsensor`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=envsensor-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=envsensor` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device envsensor`.
+Alternatively, use `--boot envsensor` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/envsensor-cwe862-coap-internal-files/qemuarm64/iotbench-envsensor-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### healthmonitor-cwe862-coap-internal-files
+
+Simulated device: **health monitor**, reusing
+`meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
+`deploy-images/healthmonitor-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/healthmonitor-cwe862-coap-internal-files/qemuarm64/iotbench-healthmonitor-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=healthmonitor`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=healthmonitor` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device healthmonitor`.
+Alternatively, use `--boot healthmonitor` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/healthmonitor-cwe862-coap-internal-files/qemuarm64/iotbench-healthmonitor-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### ipcamera-cwe862-coap-internal-files
+
+Simulated device: **surveillance IP camera**, reusing
+`meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
+`deploy-images/ipcamera-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/ipcamera-cwe862-coap-internal-files/qemuarm64/iotbench-ipcamera-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=ipcamera`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=ipcamera` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device ipcamera`.
+Alternatively, use `--boot ipcamera` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/ipcamera-cwe862-coap-internal-files/qemuarm64/iotbench-ipcamera-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### plc-cwe862-coap-internal-files
+
+Simulated device: **industrial PLC gateway (OT)**, reusing
+`meta-iotbench/recipes-devices/plc/`. Firmware directory:
+`deploy-images/plc-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/plc-cwe862-coap-internal-files/qemuarm64/iotbench-plc-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=plc`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=plc-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=plc` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device plc`.
+Alternatively, use `--boot plc` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/plc-cwe862-coap-internal-files/qemuarm64/iotbench-plc-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### router-cwe862-coap-internal-files
+
+Simulated device: **network gateway/router**, reusing
+`meta-iotbench/recipes-devices/router/`. Firmware directory:
+`deploy-images/router-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/router-cwe862-coap-internal-files/qemuarm64/iotbench-router-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=router`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=router-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=router` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device router`.
+Alternatively, use `--boot router` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/router-cwe862-coap-internal-files/qemuarm64/iotbench-router-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### smartbulb-cwe862-coap-internal-files
+
+Simulated device: **lighting smart bulb**, reusing
+`meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
+`deploy-images/smartbulb-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/smartbulb-cwe862-coap-internal-files/qemuarm64/iotbench-smartbulb-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=smartbulb`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=smartbulb` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device smartbulb`.
+Alternatively, use `--boot smartbulb` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/smartbulb-cwe862-coap-internal-files/qemuarm64/iotbench-smartbulb-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### smarthub-cwe862-coap-internal-files
+
+Simulated device: **controller/smart hub**, reusing
+`meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
+`deploy-images/smarthub-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/smarthub-cwe862-coap-internal-files/qemuarm64/iotbench-smarthub-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=smarthub`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=smarthub-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=smarthub` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device smarthub`.
+Alternatively, use `--boot smarthub` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/smarthub-cwe862-coap-internal-files/qemuarm64/iotbench-smarthub-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### smartplug-cwe862-coap-internal-files
+
+Simulated device: **energy-management smart plug**, reusing
+`meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
+`deploy-images/smartplug-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/smartplug-cwe862-coap-internal-files/qemuarm64/iotbench-smartplug-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=smartplug`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=smartplug-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=smartplug` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device smartplug`.
+Alternatively, use `--boot smartplug` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/smartplug-cwe862-coap-internal-files/qemuarm64/iotbench-smartplug-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### smartspeaker-cwe862-coap-internal-files
+
+Simulated device: **audio/voice-assistant smart speaker**, reusing
+`meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
+`deploy-images/smartspeaker-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/smartspeaker-cwe862-coap-internal-files/qemuarm64/iotbench-smartspeaker-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=smartspeaker`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=smartspeaker` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device smartspeaker`.
+Alternatively, use `--boot smartspeaker` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/smartspeaker-cwe862-coap-internal-files/qemuarm64/iotbench-smartspeaker-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+
+### thermostat-cwe862-coap-internal-files
+
+Simulated device: **climate-control thermostat**, reusing
+`meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
+`deploy-images/thermostat-cwe862-coap-internal-files/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe862-coap-internal-files.bb`.
+Default rootfs:
+`deploy-images/thermostat-cwe862-coap-internal-files/qemuarm64/iotbench-thermostat-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst`;
+kernel `Image` is exported in the same directory.
+
+The CoAP implementation is `files/iotbench-coap-internal-files.c` under
+`meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
+`/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
+`/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
+`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
+and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
+device identity remains in `/etc/iotbench/device.conf`.
+
+`GET /device/config` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/device.conf`, containing
+synthetic `device_class=thermostat`, asset reference, calibration profile and
+diagnostic mode. `GET /maintenance/info` maps only to
+`/usr/share/iotbench/coap-internal-files/internal/maintenance.dat`, containing
+a fake maintenance reference, service window and self-test state. Both files
+are marked internal-maintenance-only, root:coapfixture `0640` in a `0750`
+directory. Those maintenance artifacts should require an authorized maintenance
+client rather than be published as ordinary public telemetry.
+
+The vulnerable flow is **CoAP GET → registered `get_internal_file` handler →
+constant resource mapping → `openat`/`read` of that internal synthetic file →
+`coap_add_data` → `2.05 Content` response**. The intentionally missing check is
+authorization of the client before opening/returning the internal file.
+There is no request-derived filename, file modification or command execution.
+
+Expected static-analysis finding: correlate each reachable CoAP resource with
+its fixed internal file and read-to-response flow without a maintenance-access
+decision. Expected ground-truth label: **CoAP server communicating with
+vulnerable internal files**, **CWE-862 — Missing Authorization**.
+Safe remediation: remove these resources from the public interface, or
+authenticate and authorize maintenance clients before reading the files,
+while retaining the fixed mapping and read-only service.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=thermostat-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+Local manual test (second host terminal, no credential):
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` with `device_class=thermostat` and
+`COAP_INTERNAL_CONFIG_EXPOSED` for configuration, and
+`COAP_INTERNAL_MAINTENANCE_EXPOSED` for maintenance. Both payloads contain
+the exact corresponding internal-file bytes. Test this running device with
+`python3 scripts/test-coap-internal-files.py --device thermostat`.
+Alternatively, use `--boot thermostat` separately from manual QEMU for the
+automatic disposable-guest file-origin and rejection checks.
+
+Offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/thermostat-cwe862-coap-internal-files/qemuarm64/iotbench-thermostat-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~

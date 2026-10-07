@@ -1,0 +1,6 @@
+# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+fixture_scope=internal-maintenance-only
+maintenance_reference=IOTBENCH-SYNTHETIC-MAINTENANCE
+service_window=fixture-lab-window
+last_selftest=fixture-pass
+signal=COAP_INTERNAL_MAINTENANCE_EXPOSED

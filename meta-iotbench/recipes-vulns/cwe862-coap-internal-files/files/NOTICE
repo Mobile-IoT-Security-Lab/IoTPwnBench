@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+The CoAP GET resources /device/config and /maintenance/info expose fixed,
+synthetic internal maintenance files without authorization (CWE-862).
+Only the two predefined fixture files can be read. No credential, client
+filename, command, write operation, OS login or privilege grant is involved.

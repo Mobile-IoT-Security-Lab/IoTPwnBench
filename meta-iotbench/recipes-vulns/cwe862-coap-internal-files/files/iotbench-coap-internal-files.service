@@ -1,0 +1,21 @@
+[Unit]
+Description=INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - CoAP internal-file exposure
+After=network.target
+
+[Service]
+Type=simple
+User=coapfixture
+Group=coapfixture
+ExecStart=@BINDIR@/iotbench-coap-internal-files
+Restart=on-failure
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

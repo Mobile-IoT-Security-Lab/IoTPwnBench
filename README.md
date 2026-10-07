@@ -654,6 +654,88 @@ All images reuse their normal device profile, install only
 these recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#privilege-escalation-risk--dangerous-suid-rights-cwe-250)
 for every device's paths, metadata, build instructions and verification.
 
+### CoAP Server Communicating with Vulnerable Internal Files (CWE-862)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+All eleven device profiles have a separate read-only CoAP fixture. Its systemd
+service listens on guest UDP port `5683` and exposes two fixed resources:
+
+| CoAP resource | Predefined internal firmware file | Synthetic information |
+| --- | --- | --- |
+| `/device/config` | `/usr/share/iotbench/coap-internal-files/internal/device.conf` | Device class, fake asset reference, calibration and diagnostic configuration |
+| `/maintenance/info` | `/usr/share/iotbench/coap-internal-files/internal/maintenance.dat` | Fake maintenance reference, service window and self-test state |
+
+The handler opens the corresponding file and returns its exact bytes in a
+`2.05 Content` response **without checking authorization**. These files are
+marked internal-maintenance-only and have restrictive Unix permissions; their
+contents should not be available to arbitrary CoAP clients. The missing
+resource authorization is **CWE-862 — Missing Authorization**. No client input
+is used as a filename, and requests cannot modify files or execute commands.
+The daemon uses the existing pinned `libcoap` recipe and runs as a locked,
+unprivileged `coapfixture` service account.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `envsensor-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `healthmonitor-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `ipcamera-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `plc-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `router-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `smartbulb-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `smarthub-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `smartplug-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `smartspeaker-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+| `thermostat-cwe862-coap-internal-files` | CWE-862 | Unrestricted CoAP exposure of internal synthetic files |
+
+Build and boot from the host repository root:
+
+~~~bash
+FIRMWARE=router-cwe862-coap-internal-files docker compose run --rm yocto
+FIRMWARE=router-cwe862-coap-internal-files ./scripts/run-qemu.sh
+~~~
+
+In a second host terminal, retrieve the files manually:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --port 5683 --get /device/config
+python3 scripts/test-coap-internal-files.py --port 5683 --get /maintenance/info
+~~~
+
+Expected: `CoAP 2.05` followed by the internal file content, including
+`COAP_INTERNAL_CONFIG_EXPOSED` or `COAP_INTERNAL_MAINTENANCE_EXPOSED`.
+No credential is supplied. `QEMU_COAP_PORT` changes the loopback-only host UDP
+port; pass the same value with the client's `--port` option. These resources
+use CoAP/UDP and cannot be tested by opening an HTTP URL in a browser.
+
+For protocol regression against that running image:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --device router
+~~~
+
+For an automatic disposable QEMU boot/test, run separately from manual QEMU:
+
+~~~bash
+python3 scripts/test-coap-internal-files.py --boot router
+python3 scripts/test-coap-internal-files.py --all
+~~~
+
+Offline inspection uses the existing builder tools:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
+  --image /export/router-cwe862-coap-internal-files/qemuarm64/iotbench-router-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
+~~~
+
+Replace `router` with any device in the table. The existing architecture
+selector, export paths and `scripts/build-all.sh` apply. Safe remediation is
+to remove internal-file resources from the public interface, or authenticate
+clients and authorize maintenance access before opening the files. See
+[docs/luca-payloads.md](docs/luca-payloads.md#coap-server-communicating-with-vulnerable-internal-files-cwe-862)
+for the source-to-response data flow and per-device procedures.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
@@ -904,6 +986,7 @@ them:
 | SSH hardcoded backdoor | `127.0.0.1:2222` -> guest `:22` | `QEMU_SSH_PORT` |
 | Anonymous FTP login | `127.0.0.1:2121` -> guest `:21`; passive `30000-30009` unchanged | `QEMU_FTP_PORT` (control only) |
 | TCP service injection | `127.0.0.1:9090` -> guest `:9090` | `QEMU_SERVICE_PORT` |
+| CoAP internal-file exposure | `127.0.0.1:5683` -> guest `:5683` (UDP) | `QEMU_COAP_PORT` |
 | MQTT device profiles | `127.0.0.1:1883` -> guest `:1883` | `QEMU_MQTT_PORT` |
 | PLC profile | `127.0.0.1:1502` -> guest `:502` | `QEMU_MODBUS_PORT` |
 | Smart bulb ZCL parser | `127.0.0.1:17754` -> guest `:17754` | `QEMU_ZCL_PORT` |

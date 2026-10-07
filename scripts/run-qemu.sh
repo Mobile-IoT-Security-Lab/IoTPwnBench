@@ -13,6 +13,7 @@
 #   QEMU_ZCL_PORT   host port forwarded to the bulb bridge (default: 17754)
 #   QEMU_MEDIA_PORT host port forwarded to the speaker parser (default: 18000)
 #   QEMU_HEALTH_PORT host port forwarded to the patient protocol (default: 2575)
+#   QEMU_COAP_PORT   host UDP port forwarded to CoAP fixtures (default: 5683)
 #   QEMU_ACCEL      tcg (default), or kvm/hvf where host and guest arch match
 #   QEMU_CPU        override the emulated CPU
 #   QEMU_PERSIST    1 keeps guest writes in the .ext4 across boots (power off the
@@ -60,6 +61,11 @@ case "${FIRMWARE}" in
 esac
 
 case "${FIRMWARE}" in
+    *-cwe862-coap-internal-files)
+        COAP_PORT="${QEMU_COAP_PORT:-5683}"
+        NETDEV="${NETDEV},hostfwd=udp:127.0.0.1:${COAP_PORT}-:5683"
+        EXTRA_ENDPOINT="${EXTRA_ENDPOINT}${EXTRA_ENDPOINT:+; }CoAP: coap://127.0.0.1:${COAP_PORT}"
+        ;;
     *-cwe276-allow-anonymous-login)
         FTP_PORT="${QEMU_FTP_PORT:-2121}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${FTP_PORT}-:21"

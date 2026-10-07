@@ -1,0 +1,32 @@
+{
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "ground_truth_label": "CoAP server communicating with vulnerable internal files",
+  "vulnerability": "Unsafe exposure of synthetic internal firmware files through a CoAP server because the CoAP resource lacks adequate access control",
+  "cwe": "CWE-862",
+  "weakness": "Missing Authorization",
+  "service": "iotbench-coap-internal-files.service",
+  "executable": "@BINDIR@/iotbench-coap-internal-files",
+  "transport": "CoAP over IPv4 UDP",
+  "guest_port": 5683,
+  "daemon_uid": 992,
+  "daemon_gid": 992,
+  "authorization_check": false,
+  "read_only": true,
+  "client_supplied_filesystem_paths": false,
+  "resources": [
+    {
+      "uri": "/device/config",
+      "file": "@DATADIR@/iotbench/coap-internal-files/internal/device.conf",
+      "information": "synthetic device class, asset reference, calibration and diagnostic configuration",
+      "signal": "COAP_INTERNAL_CONFIG_EXPOSED"
+    },
+    {
+      "uri": "/maintenance/info",
+      "file": "@DATADIR@/iotbench/coap-internal-files/internal/maintenance.dat",
+      "information": "synthetic maintenance reference, service window and self-test state",
+      "signal": "COAP_INTERNAL_MAINTENANCE_EXPOSED"
+    }
+  ],
+  "expected_data_flow": "CoAP GET -> get_internal_file -> fixed resource mapping -> openat/read internal fixture file -> coap_add_data -> 2.05 Content response",
+  "remediation": "Remove internal-file resources from the public CoAP interface, or authenticate clients and authorize the maintenance role before opening these files."
+}
