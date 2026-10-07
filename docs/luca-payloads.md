@@ -2,7 +2,9 @@
 
 This guide documents the Luca firmware scenarios and their reproducible lab
 payloads. See [Hardcoded credentials (CWE-798)](#hardcoded-credentials-cwe-798)
-for the shared vendor support account on all eleven devices.
+for the shared vendor support account on all eleven devices. The separate
+[Hardcoding User Passwords](#hardcoded-credentials--hardcoding-user-passwords-cwe-798)
+fixtures model a fixed synthetic account password through local authentication.
 
 ## Weak Cipher: 3DES Device Backups
 
@@ -2434,3 +2436,965 @@ device's exported image:
 ```bash
 python3 scripts/test-dangerous-suid-rights.py --device thermostat
 ```
+
+
+## Hardcoded Credentials — Hardcoding User Passwords (CWE-798)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario and actual authentication evidence
+
+The eleven `<device>-cwe798-hardcoded-user-passwords` images combine the
+existing common image and corresponding device profile with exactly one
+vulnerability package, `cwe798-hardcoded-user-passwords`. This is separate from
+the HTTP vendor-support images documented earlier. The package adds local
+application authentication and requires no network connection or remote login.
+The shared dashboard, simulator and native telemetry are supplied by the normal
+device profiles; this fixture adds no service, web action or network listener.
+
+The modeled vulnerability is specifically **a fixed synthetic user password
+embedded directly in the firmware and reused deterministically, resulting in
+CWE-798: Use of Hard-coded Credentials**. The exact expected ground-truth label
+is **Hardcoded credentials — Hardcoding the user passwords**. The corresponding
+weakness is **CWE-798 — Use of Hard-coded Credentials**.
+
+The local application account is `fixtureuser`. Its fake, fixture-exclusive
+password is `fixture-password-123`. The source account database is
+`meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/files/accounts.conf`:
+
+~~~text
+fixtureuser:fixture-password-123
+~~~
+
+The recipe copies these bytes verbatim into
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` during `do_install`.
+The file format is one `username:plaintext-password` record. No random password,
+per-device input, environment override, installer enrollment, postinstall hook
+or first-boot provisioning supplies this credential. Every fresh image, copied
+image and installation therefore begins with the same account and password,
+including across device types and architectures. Device identity and peripheral
+specifications remain device-specific; the fixture account record is identical.
+
+The installed `/usr/bin/iotbench-fixture-auth` is the actual credential
+consumer. It reads the fixed account database using `IFS=: read -r`, reads the
+submitted password from stdin and compares both the submitted account name and
+password with the stored fields. Only a match prints
+`HARDCODED_USER_PASSWORD_ACCEPTED`, `AUTHENTICATED_AS=fixtureuser` and the
+benign marker `FIXTURE_ONLY=BENIGN_LOCAL_AUTHENTICATION`, exiting zero.
+A wrong username or password, empty input or stdin EOF exits 1 without the
+success marker. Missing/empty account storage or a wrong argument count exits 2.
+The input password must be a newline-terminated line; all inputs are treated as
+data, never sourced, evaluated, used as filenames or executed.
+
+This is a synthetic **application account**, following the existing CWE-798
+application-identity convention. It does not create an OS user, alter
+`/etc/passwd` or `/etc/shadow`, grant a shell, run a command on authentication,
+change privileges or store a login session. The helper only reads its fixed
+configuration and prints a marker. Run it from the existing guest root serial
+console to read the root-only database; authenticating `fixtureuser` grants no
+root privilege. Serial-console development credentials belong to the common
+image and are separate from the measured fixture account.
+
+### Firmware components and permissions
+
+The vulnerability directory is
+`meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`. The recipe uses
+local `file://` sources, `S = "${UNPACKDIR}"`, standard Yocto path variables
+and the already available BusyBox shell; it adds no layer or source download.
+It marks the account database as a configuration file. Source edits followed by
+a rebuild change a fixture variant; there is no automatic password change.
+
+| Source under the vulnerability directory | Firmware component / role |
+| --- | --- |
+| `cwe798-hardcoded-user-passwords_1.0.bb` | Installs the account record verbatim and the local authentication consumer |
+| `files/accounts.conf` | `/etc/iotbench/hardcoded-user-passwords/accounts.conf`, root:root `0600`; actual synthetic account/password |
+| `files/iotbench-fixture-auth` | `/usr/bin/iotbench-fixture-auth`, root:root `0755`; compares supplied credentials with that record |
+| `files/ground-truth.json` | `/usr/share/iotbench/hardcoded-user-passwords/ground-truth.json`, `0644`; account, password, consumer, exact label and CWE |
+| `files/NOTICE` | `/usr/share/iotbench/hardcoded-user-passwords/NOTICE`, `0644`; exact warning and synthetic scope |
+| `files/test-guest.sh` | `/usr/share/iotbench/hardcoded-user-passwords/test-guest.sh`, `0644`; explicitly invoked local regression |
+| `files/LICENSE` | Existing repository MIT license convention |
+
+`meta-iotbench/recipes-images/iotbench-hardcoded-user-passwords.inc` fails
+image generation if the credential bytes differ from the source or if the
+database/helper ownership and modes change. It appends NOTICE to `/etc/motd`;
+the helper itself also prints the exact warning. The database has normal
+root-only permissions, and the helper has no SUID/SGID or sudo grant. Those
+permissions limit live file access, but an analyzer can extract the plaintext
+from the ext4 firmware without authenticating or booting it. The embedded
+credential remains recoverable from every distributed copy.
+
+Detection must correlate **a real synthetic account record, a fixed embedded
+password, deterministic image installation, and the helper's authentication
+comparison**. A random string containing `password`, `passwd`, `credential` or
+`secret` is insufficient by itself. Metadata is an annotation of the expected
+finding, not a substitute for tracing the actual account-to-consumer relationship.
+
+This differs from generic vulnerable Java/JAR applications and generic vulnerable
+C binaries: the package has neither and installs an actual firmware account
+configuration and its local shell authentication component. It differs from
+unused password-looking sample strings because the stored password controls
+authentication. It contains no real leaked credentials: both account and password
+are clearly fake and exclusively dedicated to this fixture. Ordinary
+`/etc/passwd` entries with no hardcoded password do not establish this scenario,
+and neither do password hashes or authentication artifacts lacking a tie to a
+deterministic hardcoded account credential. Generic weak-password examples
+where a password is supplied externally are also different: here the firmware
+itself ships the fixed credential, regardless of a caller's submitted input.
+
+### Shared local build and testing
+
+Run host commands from the repository root. The default machine is `qemuarm64`;
+`YOCTO_MACHINE` selects the existing `qemuarm`, `qemux86-64`, `qemux86` or
+`qemumips` alternatives. Use the same selector for building and booting.
+`scripts/build-all.sh` discovers these eleven image recipes automatically.
+To parse and resolve one target without building, use:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe798-hardcoded-user-passwords'
+~~~
+
+Build all eleven:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe798-hardcoded-user-passwords.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+Each export contains the compressed ext4 rootfs and kernel. Per-device paths
+and commands follow below. Log into a manually booted guest through its serial
+console using the common `root` / `routeradmin` development login, then run:
+
+~~~bash
+cat /etc/iotbench/hardcoded-user-passwords/accounts.conf
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+printf '%s\n' 'fixture-password-wrong' | iotbench-fixture-auth fixtureuser
+~~~
+
+Expected: the fixed account record; then the success marker with status zero;
+then `FIXTURE_AUTH_REJECTED` with status 1. Authentication needs only the
+local files and stdin; no HTTP, SSH, Telnet, FTP, MQTT or Modbus client is used.
+
+The installed `test-guest.sh` verifies deterministic account content, device
+identity, normal permissions, repeated success, wrong account/password, missing
+or empty input, extra arguments and shell-shaped data rejection. In the
+**disposable test snapshot only**, it temporarily replaces the stored password:
+the original password must fail and the replacement must succeed. It then checks
+that missing/empty credential storage fails closed and restores the original
+account record. This is evidence that the helper uses the installed credential;
+the temporary test edit is not firmware provisioning or a production fix.
+Expected: four `PASS` lines and status zero.
+
+`scripts/test-hardcoded-user-passwords.py --image <path>` inspects an ext4 or
+ext4.zst image with `debugfs`, checking credential bytes, the exact installed
+consumer/test, ownership, permissions, metadata, device identity and the warning.
+It does not mount or execute the firmware. Run it on the host with Python 3,
+`zstd` and `debugfs`, or use the existing builder container as in the per-device
+commands. Expected: two `PASS` lines and status zero.
+
+The same host runner uses `--device <device>` or `--all` to boot disposable
+QEMU snapshots and run the guest regression over the serial console. Run it
+separately from a manually running QEMU instance. QEMU and `zstd` must be
+installed on the host. For Apple Silicon acceleration and unused host ports:
+
+~~~bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-hardcoded-user-passwords.py --all
+~~~
+
+Console logs are saved in each exported firmware directory as
+`validation-console.log`. These host-port settings only support the existing
+device profiles; the regression uses no network authentication.
+
+### Safe remediation
+
+For a corrected firmware variant, remove the embedded shared password and enroll
+a unique account credential separately for each installation. Keep a salted
+password hash in an access-controlled credential store outside the distributable
+firmware and support rotation. Merely changing the shared literal, embedding its
+hash, hiding it or retaining root-only permissions does not remove deterministic
+credential reuse. Verify that the published fixture password no longer succeeds,
+that an enrolled credential does succeed locally, and that it fails on another
+installation. Rebuild source changes for a lasting variant; QEMU snapshots
+discard temporary edits. The known-positive fixture regression must fail its
+hardcoded-credential assertion against a properly corrected variant.
+
+
+### Completed validation
+
+On 2026-10-07, all eleven `qemuarm64` fixtures built and exported successfully
+after BitBake parsing and router dependency dry-run validation. Offline
+`debugfs` inspection of every compressed ext4 export confirmed the exact
+`fixtureuser:fixture-password-123` account record, installed authentication
+consumer and guest test, root-owned `0600` database, ordinary `0755` helper,
+device identity, metadata and required warning. Account and helper bytes were
+identical across all device images.
+
+All eleven images booted in disposable QEMU snapshots using HVF and the host
+CPU. Each passed all four guest regression groups, including repeated use of
+the fixed password, rejection checks, temporary password replacement proving
+credential consumption, and missing/empty database failure with restoration.
+The tests used the serial console; authentication required no networking.
+Every image manifest contained exactly one vulnerability package,
+`cwe798-hardcoded-user-passwords`.
+
+The [local validation report](../deploy-images/hardcoded-user-passwords-qemuarm64-validation.txt)
+contains results and rootfs/kernel/helper SHA-256 checksums. Each firmware
+export also contains `validation-console.log` and `rootfs.manifest`. Full
+build and parse logs are saved as
+`deploy-images/hardcoded-user-passwords-qemuarm64-build.log` and
+`deploy-images/hardcoded-user-passwords-qemuarm64-parse.log`.
+Other supported architectures were not built or boot-tested in this run.
+The CWE-798 finding is expected ground truth; validation used actual builds,
+filesystem inspection and local authentication, without running an external
+firmware-analysis engine.
+
+### doorlock-cwe798-hardcoded-user-passwords
+
+Simulated device: **access-control door lock**, using the existing
+`meta-iotbench/recipes-devices/doorlock/` profile. Firmware directory:
+`deploy-images/doorlock-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/doorlock-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-doorlock-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=doorlock-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh doorlock
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/doorlock-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-doorlock-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device doorlock
+~~~
+
+
+### envsensor-cwe798-hardcoded-user-passwords
+
+Simulated device: **environmental sensor**, using the existing
+`meta-iotbench/recipes-devices/envsensor/` profile. Firmware directory:
+`deploy-images/envsensor-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/envsensor-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-envsensor-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=envsensor-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh envsensor
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/envsensor-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-envsensor-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device envsensor
+~~~
+
+
+### healthmonitor-cwe798-hardcoded-user-passwords
+
+Simulated device: **health monitor**, using the existing
+`meta-iotbench/recipes-devices/healthmonitor/` profile. Firmware directory:
+`deploy-images/healthmonitor-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/healthmonitor-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-healthmonitor-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh healthmonitor
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/healthmonitor-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-healthmonitor-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device healthmonitor
+~~~
+
+
+### ipcamera-cwe798-hardcoded-user-passwords
+
+Simulated device: **surveillance IP camera**, using the existing
+`meta-iotbench/recipes-devices/ipcamera/` profile. Firmware directory:
+`deploy-images/ipcamera-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/ipcamera-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-ipcamera-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh ipcamera
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/ipcamera-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-ipcamera-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device ipcamera
+~~~
+
+
+### plc-cwe798-hardcoded-user-passwords
+
+Simulated device: **industrial PLC gateway (OT)**, using the existing
+`meta-iotbench/recipes-devices/plc/` profile. Firmware directory:
+`deploy-images/plc-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/plc-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-plc-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=plc-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh plc
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/plc-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-plc-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device plc
+~~~
+
+
+### router-cwe798-hardcoded-user-passwords
+
+Simulated device: **network gateway/router**, using the existing
+`meta-iotbench/recipes-devices/router/` profile. Firmware directory:
+`deploy-images/router-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/router-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-router-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=router-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh router
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/router-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-router-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device router
+~~~
+
+
+### smartbulb-cwe798-hardcoded-user-passwords
+
+Simulated device: **lighting smart bulb**, using the existing
+`meta-iotbench/recipes-devices/smartbulb/` profile. Firmware directory:
+`deploy-images/smartbulb-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/smartbulb-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartbulb-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh smartbulb
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/smartbulb-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartbulb-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device smartbulb
+~~~
+
+
+### smarthub-cwe798-hardcoded-user-passwords
+
+Simulated device: **controller/smart hub**, using the existing
+`meta-iotbench/recipes-devices/smarthub/` profile. Firmware directory:
+`deploy-images/smarthub-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/smarthub-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smarthub-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=smarthub-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh smarthub
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/smarthub-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smarthub-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device smarthub
+~~~
+
+
+### smartplug-cwe798-hardcoded-user-passwords
+
+Simulated device: **energy-management smart plug**, using the existing
+`meta-iotbench/recipes-devices/smartplug/` profile. Firmware directory:
+`deploy-images/smartplug-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/smartplug-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartplug-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=smartplug-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh smartplug
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/smartplug-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartplug-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device smartplug
+~~~
+
+
+### smartspeaker-cwe798-hardcoded-user-passwords
+
+Simulated device: **audio/voice-assistant smart speaker**, using the existing
+`meta-iotbench/recipes-devices/smartspeaker/` profile. Firmware directory:
+`deploy-images/smartspeaker-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/smartspeaker-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartspeaker-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh smartspeaker
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/smartspeaker-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-smartspeaker-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device smartspeaker
+~~~
+
+
+### thermostat-cwe798-hardcoded-user-passwords
+
+Simulated device: **climate-control thermostat**, using the existing
+`meta-iotbench/recipes-devices/thermostat/` profile. Firmware directory:
+`deploy-images/thermostat-cwe798-hardcoded-user-passwords/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe798-hardcoded-user-passwords.bb`.
+For the default machine, the rootfs is
+`deploy-images/thermostat-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-thermostat-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst`;
+the kernel is `Image` in that same directory.
+
+Relevant firmware files are
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf` (the real local
+application account database), `/usr/bin/iotbench-fixture-auth` (its
+credential consumer), and `NOTICE`, `ground-truth.json` and `test-guest.sh`
+under `/usr/share/iotbench/hardcoded-user-passwords/`. The corresponding
+sources are in `meta-iotbench/recipes-vulns/cwe798-hardcoded-user-passwords/`.
+The device identity remains in `/etc/iotbench/device.conf`.
+
+The synthetic application account is **`fixtureuser`**. Its password,
+**`fixture-password-123`**, is hardcoded directly in `accounts.conf` as
+`fixtureuser:fixture-password-123`. The package recipe installs this record
+verbatim at image build time; the local helper reads it and requires matching
+account and password before returning its benign authentication marker.
+There is no credential generation, per-device provisioning or external password
+source. Thus every copy of this firmware contains the same extractable account
+credential, even though the database is root-owned with mode `0600`.
+
+Expected static-analysis finding: trace that installed account record and its
+fixed plaintext password into the local helper's authentication comparisons,
+then identify deterministic credential reuse. A password-looking string alone
+is insufficient. Expected ground-truth label: **Hardcoded credentials —
+Hardcoding the user passwords**. Corresponding weakness: **CWE-798 — Use of
+Hard-coded Credentials**. Safe remediation: remove the embedded shared password,
+enroll a unique credential for this installation and store a salted password hash
+outside the distributable image, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=thermostat-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+Local runtime test (inside this guest's root serial console):
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh thermostat
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED` and `AUTHENTICATED_AS=fixtureuser`,
+then four regression `PASS` lines; both commands exit zero. Wrong credentials
+are rejected with exit 1. The helper grants only a marker, no OS access.
+For offline verification without booting (host):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/thermostat-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-thermostat-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. Alternatively, let the host runner boot, test and
+close this image separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-hardcoded-user-passwords.py --device thermostat
+~~~

@@ -1,0 +1,19 @@
+{
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "ground_truth_label": "Hardcoded credentials — Hardcoding the user passwords",
+  "cwe": "CWE-798",
+  "weakness": "Use of Hard-coded Credentials",
+  "account_type": "synthetic local application account, not an OS login",
+  "username": "fixtureuser",
+  "password": "fixture-password-123",
+  "credential_file": "@SYSCONFDIR@/iotbench/hardcoded-user-passwords/accounts.conf",
+  "credential_format": "username:plaintext-password",
+  "consumer": "@BINDIR@/iotbench-fixture-auth",
+  "signal": "HARDCODED_USER_PASSWORD_ACCEPTED",
+  "installed_verbatim_at_build_time": true,
+  "unique_per_installation": false,
+  "runtime_provisioning": false,
+  "network_required": false,
+  "authentication_effect": "prints a benign fixture-only marker; no OS access or privilege change",
+  "remediation": "Remove the embedded shared password; enroll a unique credential per installation and store a salted password hash outside the distributable firmware."
+}

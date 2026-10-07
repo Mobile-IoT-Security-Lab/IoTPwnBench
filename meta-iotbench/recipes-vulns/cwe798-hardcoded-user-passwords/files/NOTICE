@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+The synthetic application account fixtureuser uses fixture-password-123.
+The account database is embedded verbatim in every image for CWE-798 testing.
+This fake credential is dedicated exclusively to this fixture. Authentication
+only prints a harmless local marker; it grants no OS login or privileges.

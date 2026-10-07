@@ -286,6 +286,83 @@ their own SSH entry points. See
 [docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials-cwe-798)
 for credentials, extraction, API payloads, expected signals and verification.
 
+### Hardcoded Credentials — Hardcoding User Passwords (CWE-798)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+These separate local fixtures install the synthetic application account
+`fixtureuser` with the fixed fake password `fixture-password-123` in
+`/etc/iotbench/hardcoded-user-passwords/accounts.conf`. The local
+`/usr/bin/iotbench-fixture-auth` helper consumes this account record, checks the
+supplied username and stdin password, and prints a harmless marker only on
+success. The account database is copied verbatim at build time, so every image
+contains the same recoverable credential. Root-only file permissions do not
+prevent offline firmware extraction.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `envsensor-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `healthmonitor-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `ipcamera-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `plc-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `router-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `smartbulb-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `smarthub-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `smartplug-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `smartspeaker-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+| `thermostat-cwe798-hardcoded-user-passwords` | CWE-798 | Fixed synthetic local account password |
+
+Build and boot from the host repository root:
+
+~~~bash
+FIRMWARE=router-cwe798-hardcoded-user-passwords docker compose run --rm yocto
+FIRMWARE=router-cwe798-hardcoded-user-passwords ./scripts/run-qemu.sh
+~~~
+
+From the guest root serial console (the existing `root` / `routeradmin` lab
+login), run:
+
+~~~bash
+printf '%s\n' 'fixture-password-123' | iotbench-fixture-auth fixtureuser
+sh /usr/share/iotbench/hardcoded-user-passwords/test-guest.sh router
+~~~
+
+Expected: `HARDCODED_USER_PASSWORD_ACCEPTED`, `AUTHENTICATED_AS=fixtureuser`
+and exit zero for the first command; four `PASS` lines for the regression.
+Wrong username/password combinations fail with status 1. The account is an
+application identity with no OS login, shell or privilege grant. The fixture
+uses no networking; device-native services come from the existing profiles.
+It installs only `cwe798-hardcoded-user-passwords` as its vulnerability package.
+
+Offline verification uses the builder's existing tools:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-hardcoded-user-passwords.py \
+  --image /export/router-cwe798-hardcoded-user-passwords/qemuarm64/iotbench-router-cwe798-hardcoded-user-passwords-qemuarm64.rootfs.ext4.zst
+# Automated serial testing; run separately from a manually running guest:
+python3 scripts/test-hardcoded-user-passwords.py --device router
+python3 scripts/test-hardcoded-user-passwords.py --all
+~~~
+
+Replace `router` with any listed device. Build all eleven using:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe798-hardcoded-user-passwords.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+The existing `YOCTO_MACHINE` selector and `scripts/build-all.sh` apply; exports
+go to `deploy-images/<device>-cwe798-hardcoded-user-passwords/<machine>/`.
+Detection requires the installed account credential and its authentication
+consumer, rather than a password-looking string alone. The exact ground-truth
+label is **Hardcoded credentials — Hardcoding the user passwords**,
+**CWE-798 — Use of Hard-coded Credentials**. See
+[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials--hardcoding-user-passwords-cwe-798)
+for per-device files, build/test instructions and remediation.
+
 ### Bad SUDO Rights — Path Traversal (CWE-22)
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
