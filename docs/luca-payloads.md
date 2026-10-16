@@ -8,6 +8,9 @@ fixtures model a fixed synthetic account password through local authentication.
 The [Vulnerable Bash Files — Path Traversal](#vulnerable-bash-files--path-traversal-cwe-22)
 fixtures model unvalidated local path concatenation in a firmware Bash helper.
 
+The [Vulnerable C Binaries — SQL injection](#vulnerable-c-binaries--sql-injection-cwe-89)
+fixtures model native C argument interpolation into a local SQLite SELECT.
+
 ## Weak Cipher: 3DES Device Backups
 
 These images implement intentionally vulnerable device backup encryption under
@@ -6617,3 +6620,1134 @@ manual QEMU:
 ~~~bash
 python3 scripts/test-bash-path-traversal.py --device thermostat
 ~~~
+
+## Vulnerable C Binaries — SQL injection (CWE-89)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario, source and sink
+
+Each of the eleven existing profiles has one new `<device>-cwe089-c-sql-injection`
+firmware with the sole vulnerability package `cwe089-c-sql-injection`. They reuse
+the common image, native services, simulated peripherals, pinned layers,
+architecture selector, cross compiler and export/QEMU mechanisms. The canonical
+input is a local command-line argument, so no web module or remote input is needed.
+
+Expected exact ground-truth label: **Vulnerable C Binaries — SQL injection**.
+Expected finding: **CWE-89**, externally controlled SQL syntax in a native C
+firmware executable exposing an additional synthetic record through SELECT.
+The full required relationship is **C binary input + SQL query construction +
+user-controlled value inserted into SQL syntax + missing secure parameter
+binding + SQLite query execution + modified query semantics**.
+
+The corresponding source is
+[`fixture-db-query.c`](../meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c).
+Exact locations (also installed as the same source in the firmware):
+
+| Stage | Source location | Meaning |
+| --- | --- | --- |
+| Source | `main()`, lines 50–54 | Length-check `argv[1]` and assign `input` |
+| Transformation / missing protection | `main()`, lines 57–59 | `snprintf()` directly embeds `input` in `WHERE record_name = '%s'`; no binding or SQL escaping |
+| Database open | `main()`, line 65 | Fixed path, `sqlite3_open_v2(..., SQLITE_OPEN_READONLY, NULL)` |
+| Preparation sink | `main()`, line 77 | `sqlite3_prepare_v2(db, query, -1, &stmt, &tail)` consumes the constructed SQL |
+| Execution sink | `main()`, line 81 | `sqlite3_step(stmt)` executes the SELECT and retrieves rows |
+| Consequence | `main()`, lines 84–86 | `sqlite3_column_text()` and fixed-format `printf()` return synthetic values |
+
+Representative vulnerable flow and expected static-analysis data flow:
+
+~~~text
+argv[1] = "public' OR '1'='1" → input
+→ snprintf() constructs SQL query
+→ SELECT record_name, record_value FROM fixture_records
+  WHERE record_name = 'public' OR '1'='1' ORDER BY id;
+→ sqlite3_prepare_v2() → sqlite3_step() → sqlite3_column_text()
+→ synthetic internal database record returned: SYNTHETIC_INTERNAL_FIXTURE_DATA
+~~~
+
+The quote closes the intended SQL value; `OR '1'='1'` becomes an always-true
+SQL predicate, so both rows match. Normal `public` produces only
+`WHERE record_name = 'public' ORDER BY id;`, selecting row 1. The program intends
+a single named lookup. It instead treats externally controlled text as SQL
+syntax rather than a bound SQL value. `sqlite3_prepare_v2()` alone is not safe
+parameterization: the vulnerability is already present in the SQL it receives.
+There is no `sqlite3_bind_text()`, integer binding, placeholder, `%q` escaping,
+quote/operator filtering, value allowlist or query rewriting in this code path.
+
+These are not generic vulnerable Java/JAR applications, SQL injection in Java,
+PHP or Python, or Bash-based vulnerabilities. Only the native C executable
+constructs and executes the vulnerable query; shell/Python code is test harness
+code. This differs from generic C argument consumers, C database openers, fixed
+SQLite query programs and correctly parameterized applications: accepting an
+argument, opening a database or executing a fixed query alone is insufficient.
+The complete source-to-SQL-to-execution relationship is required. These are not
+buffer overflow, memory corruption, command injection, arbitrary command
+execution or unsafe sudo helper examples. The C program never invokes a shell,
+process, package manager or network API and adds no SUID, sudo rule, login,
+privilege grant or unrelated application outside the firmware.
+
+### Database, packaging and runtime scope
+
+| Artifact | Firmware path / role |
+| --- | --- |
+| Vulnerable native ELF executable | `/usr/bin/fixture-db-query`, root:root `0755` |
+| Synthetic SQLite database | `/usr/share/iotbench/c-sql-injection/fixture.db`, root:root `0444` |
+| Matching C source | `/usr/share/iotbench/c-sql-injection/fixture-db-query.c` |
+| Supporting firmware assets | `schema.sql`, `NOTICE`, `LICENSE`, `ground-truth.json`, `test-guest.sh` in the same data directory, root:root `0644` |
+| Repository package / source directory | `meta-iotbench/recipes-vulns/cwe089-c-sql-injection/` / `files/` |
+
+The schema is `fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL
+UNIQUE, record_value TEXT NOT NULL, visibility TEXT NOT NULL)`, with a CHECK
+restricting `visibility` to `public` or `internal`. Its exact two rows are:
+
+| id | record_name | record_value | visibility |
+| --- | --- | --- | --- |
+| 1 | public | SYNTHETIC_PUBLIC_FIXTURE_DATA | public |
+| 2 | internal | SYNTHETIC_INTERNAL_FIXTURE_DATA | internal |
+
+All values are synthetic, contain no credentials or real data, and are identical
+across profiles. "Internal" denotes the extra record outside the normal public
+lookup result, not an OS permission boundary or a separate authentication bug.
+`schema.sql` creates records only during the build using `sqlite3-native`;
+there is no runtime creation, modification, deletion or schema change. The
+recipe recreates the database from scratch with fixed page size and ordered
+rows. The database format is portable across the existing target architectures.
+
+The package uses `${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}`, links `-lsqlite3`,
+and depends on `sqlite3 sqlite3-native` from the already pinned core layer.
+Yocto supplies the cross compiler, target headers/library, shared-library
+runtime dependency and native database generator. The target SQLite CLI and
+Python are unnecessary. `util-linux-setpriv` is used only by the guest test to
+prove unprivileged execution. File layout and permissions follow the existing
+local-helper convention; there is no new firmware architecture or service.
+
+The executable opens only its compiled fixed database path (no filename/env
+argument, URI flag or host database). It enforces a read-only connection and a
+single read-only two-column statement, finalizes it and closes the connection.
+An independent SQLite authorizer permits only SELECT and reads from
+`main.fixture_records`; it denies other tables, ATTACH, SQL functions and all
+write operations. Extension loading is explicitly disabled. These restrictions
+contain the lab to synthetic data; they do not inspect or constrain WHERE
+predicates, and the required OR injection remains effective. Input is capped
+at 240 bytes solely for bounded storage, `snprintf()` is checked, and SQLite
+errors and null column pointers are handled. A progress budget, expression and
+value limits and a 16-row output cap bound work. Output uses a constant format.
+No external database, credentials, sockets, host filesystem writes, persistence
+or system security changes are involved. The helper needs no root privileges.
+The exact warning appears in package NOTICE, `/etc/motd` and helper stderr.
+
+### Shared build and local verification
+
+From the host repository root, parse and resolve dependencies:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe089-c-sql-injection'
+~~~
+
+Build all eleven with the existing process:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe089-c-sql-injection.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+Default machine is `qemuarm64`. Set the same `YOCTO_MACHINE` for build and boot
+for `qemuarm`, `qemux86-64`, `qemux86` or `qemumips`. The recipes contain no fixed
+CPU or toolchain; architecture builds use the established Yocto conventions.
+`scripts/build-all.sh` automatically discovers the new recipes.
+
+The guest test has six assertion groups: native ELF/database installation and
+ordinary permissions; deterministic public-only lookup and absent-name behavior;
+the exact injection returning both records; argument counts, length boundaries,
+malformed SQL and literal shell-shaped values; extra-statement/schema/function
+rejection; and non-root execution with unchanged database checksum and no journal
+sidecars. All lookup invocations use UID/GID 65534 with cleared supplementary
+groups. It uses only benign SELECT payloads and never modifies the database.
+A hardened parameterized replacement would fail the intended positive injection
+assertion. Exit codes are 0 for successful queries (including zero matches),
+1 for SQLite/scope failures, and 2 for argument/length errors.
+
+`scripts/test-c-sql-injection.py --image <ext4-or-ext4.zst>` reads firmware with
+`debugfs` without mounting or executing it, verifies ELF SQLite API references
+and fixed path, exact source/assets, normal ownership/modes and safe ancestors,
+warning, schema and both synthetic rows. It opens only a temporary copy of the
+extracted synthetic database with Python SQLite `mode=ro&immutable=1`; Python
+is test infrastructure, not the vulnerability implementation. Expected output:
+two `PASS` lines. The builder's cached `e2fsprogs-native` provides `debugfs`;
+use `--debugfs` if it is not on PATH (see the per-device examples).
+
+Automatic runtime tests use the existing serial console in disposable QEMU
+snapshots, close QEMU on completion and save `validation-console.log` beside
+each export. Run separately from manual QEMU:
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device router
+python3 scripts/test-c-sql-injection.py --all
+# Apple Silicon acceleration and unused existing device-service ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-c-sql-injection.py --all
+~~~
+
+The runner requires host QEMU and `zstd`. Tests need no internet or external
+service. Host-loopback forwards support only the unchanged device services;
+the SQL helper itself has no network surface.
+
+### Safe remediation
+
+In a separate corrected variant, prepare this constant SQL:
+
+~~~sql
+SELECT record_name, record_value FROM fixture_records
+WHERE record_name = ? ORDER BY id;
+~~~
+
+Call `sqlite3_prepare_v2()` on that fixed query, then
+`sqlite3_bind_text(stmt, 1, input, -1, SQLITE_TRANSIENT)`, check return codes,
+and use `sqlite3_step()` before finalizing and closing. The input then remains
+a value even when it contains quotes or SQL operators. Keep the read-only
+connection, bounded input and ordinary permissions. Normal `public` must still
+return its marker; the crafted string must return no row and no internal
+marker. The intentionally vulnerable fixtures do not implement this fix.
+
+### Completed validation
+
+On 2026-10-16, all eleven `qemuarm64` fixtures built and exported successfully
+using the pinned builder after clean layer parsing and a router dependency dry
+run. Each exported manifest contains exactly one vulnerability package,
+`cwe089-c-sql-injection`, and the target `libsqlite3-0` shared library. The native
+C helper compiled with `-Wall -Wextra -Werror` and the normal Yocto flags.
+
+Offline `debugfs` verification passed for every compressed ext4 image: actual
+native ELF and SQLite API references, compiled fixed database path, exact
+installed source/schema/test/metadata, two synthetic records and database
+integrity, ordinary root-owned permissions and safe ancestors, device identity
+and required NOTICE/login warning. Helper and database bytes are identical
+across all eleven images. Two fresh database generations using the pinned
+`sqlite3-native` matched each other and the installed database byte for byte.
+
+All eleven images then booted as disposable QEMU snapshots with HVF/host CPU
+and passed all six guest assertion groups, **66 checks total**. The exact
+normal lookup returned only the public marker; the exact injection returned
+both public and internal markers. Every lookup ran as UID/GID 65534 with cleared
+groups. Argument and length boundaries, malformed SQL, literal shell-shaped
+input, extra statements, non-fixture tables and SQL functions behaved as
+specified; the database checksum stayed unchanged and no journal sidecar
+appeared. Tests used only the local serial console and existing device-service
+host-loopback ports HTTP `18080`, MQTT `21883` and Modbus `11502`. The SQL helper
+uses no network. The guest checks use commands supported by the pinned BusyBox
+configuration and do not modify the database.
+
+The [local validation report](../deploy-images/c-sql-injection-qemuarm64-validation.txt)
+records all 66 assertions and SHA-256 checksums for compressed rootfs, kernel,
+manifest, console logs and implementation sources. Each device export contains
+`rootfs.manifest` and `validation-console.log`; aggregate build, parse, offline,
+runtime and database-determinism logs are under
+`deploy-images/c-sql-injection-qemuarm64-*`. Other supported architectures were
+not built or boot-tested. No external static-analysis engine was run; CWE-89
+is the expected ground truth supported by the installed C flow and reproduced
+SQL behavior.
+
+### doorlock-cwe089-c-sql-injection
+
+Simulated device: **access-control door lock**, reusing
+`meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
+`deploy-images/doorlock-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=doorlock-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh doorlock
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/doorlock-cwe089-c-sql-injection/qemuarm64/iotbench-doorlock-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device doorlock
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/doorlock-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/doorlock-cwe089-c-sql-injection/qemuarm64/iotbench-doorlock-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### envsensor-cwe089-c-sql-injection
+
+Simulated device: **environmental sensor**, reusing
+`meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
+`deploy-images/envsensor-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=envsensor-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh envsensor
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/envsensor-cwe089-c-sql-injection/qemuarm64/iotbench-envsensor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device envsensor
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/envsensor-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/envsensor-cwe089-c-sql-injection/qemuarm64/iotbench-envsensor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### healthmonitor-cwe089-c-sql-injection
+
+Simulated device: **health monitor**, reusing
+`meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
+`deploy-images/healthmonitor-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh healthmonitor
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/healthmonitor-cwe089-c-sql-injection/qemuarm64/iotbench-healthmonitor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device healthmonitor
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/healthmonitor-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/healthmonitor-cwe089-c-sql-injection/qemuarm64/iotbench-healthmonitor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### ipcamera-cwe089-c-sql-injection
+
+Simulated device: **surveillance IP camera**, reusing
+`meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
+`deploy-images/ipcamera-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh ipcamera
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/ipcamera-cwe089-c-sql-injection/qemuarm64/iotbench-ipcamera-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device ipcamera
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/ipcamera-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/ipcamera-cwe089-c-sql-injection/qemuarm64/iotbench-ipcamera-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### plc-cwe089-c-sql-injection
+
+Simulated device: **industrial PLC gateway (OT)**, reusing
+`meta-iotbench/recipes-devices/plc/`. Firmware directory:
+`deploy-images/plc-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=plc-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh plc
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/plc-cwe089-c-sql-injection/qemuarm64/iotbench-plc-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device plc
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/plc-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/plc-cwe089-c-sql-injection/qemuarm64/iotbench-plc-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### router-cwe089-c-sql-injection
+
+Simulated device: **network router / gateway**, reusing
+`meta-iotbench/recipes-devices/router/`. Firmware directory:
+`deploy-images/router-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=router-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh router
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe089-c-sql-injection/qemuarm64/iotbench-router-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device router
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/router-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/router-cwe089-c-sql-injection/qemuarm64/iotbench-router-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### smartbulb-cwe089-c-sql-injection
+
+Simulated device: **lighting / smart bulb**, reusing
+`meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
+`deploy-images/smartbulb-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh smartbulb
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartbulb-cwe089-c-sql-injection/qemuarm64/iotbench-smartbulb-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device smartbulb
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/smartbulb-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/smartbulb-cwe089-c-sql-injection/qemuarm64/iotbench-smartbulb-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### smarthub-cwe089-c-sql-injection
+
+Simulated device: **controller / smart hub**, reusing
+`meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
+`deploy-images/smarthub-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=smarthub-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh smarthub
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smarthub-cwe089-c-sql-injection/qemuarm64/iotbench-smarthub-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device smarthub
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/smarthub-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/smarthub-cwe089-c-sql-injection/qemuarm64/iotbench-smarthub-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### smartplug-cwe089-c-sql-injection
+
+Simulated device: **energy-management smart plug**, reusing
+`meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
+`deploy-images/smartplug-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=smartplug-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh smartplug
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartplug-cwe089-c-sql-injection/qemuarm64/iotbench-smartplug-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device smartplug
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/smartplug-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/smartplug-cwe089-c-sql-injection/qemuarm64/iotbench-smartplug-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### smartspeaker-cwe089-c-sql-injection
+
+Simulated device: **audio / voice-assistant speaker**, reusing
+`meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
+`deploy-images/smartspeaker-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh smartspeaker
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartspeaker-cwe089-c-sql-injection/qemuarm64/iotbench-smartspeaker-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device smartspeaker
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/smartspeaker-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/smartspeaker-cwe089-c-sql-injection/qemuarm64/iotbench-smartspeaker-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+### thermostat-cwe089-c-sql-injection
+
+Simulated device: **climate-control thermostat**, reusing
+`meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
+`deploy-images/thermostat-cwe089-c-sql-injection/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe089-c-sql-injection.bb`.
+Sole vulnerability package: `cwe089-c-sql-injection`; normal device services and
+peripherals remain installed.
+
+Vulnerable native C executable: `/usr/bin/fixture-db-query`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe089-c-sql-injection/files/fixture-db-query.c`,
+also installed under `/usr/share/iotbench/c-sql-injection/`. Synthetic database:
+`/usr/share/iotbench/c-sql-injection/fixture.db`. Schema:
+`fixture_records(id INTEGER PRIMARY KEY, record_name TEXT NOT NULL UNIQUE,
+record_value TEXT NOT NULL, visibility TEXT NOT NULL)`; public/internal CHECK
+and exact rows are listed above. Public row 1 is
+`public|SYNTHETIC_PUBLIC_FIXTURE_DATA`; internal row 2 is
+`internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, reachable through the injection.
+
+The first command-line argument (`argv[1]` → `input`, line 54) controls the SQL
+value. Query construction is `snprintf()` at **lines 57–59** of that source,
+embedding it directly into `WHERE record_name = '%s' ORDER BY id;`. Safe SQL
+parameter binding and escaping are intentionally missing there. The exact
+preparation sink is **`sqlite3_prepare_v2()` at line 77**, followed by execution
+through **`sqlite3_step()` at line 81**. The operation is a harmless SELECT of
+synthetic names and values from the fixed read-only database.
+
+Representative flow and expected static-analysis data flow:
+`input "public' OR '1'='1"` → `snprintf()` constructs SQL →
+`WHERE record_name = 'public' OR '1'='1' ORDER BY id` →
+`sqlite3_prepare_v2()` → `sqlite3_step()` → synthetic internal record returned.
+The injected quote and true OR predicate alter SQL semantics because input is
+embedded in syntax instead of bound as a value. Expected finding: **CWE-89**,
+argument-to-SQL-to-SQLite data flow with missing binding. Exact ground-truth
+label: **Vulnerable C Binaries — SQL injection**. Safe remediation: in a
+separate corrected variant use `WHERE record_name = ?`, prepare fixed SQL,
+`sqlite3_bind_text()` and then `sqlite3_step()`, as described above.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe089-c-sql-injection docker compose run --rm yocto
+FIRMWARE=thermostat-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+Inside that guest's serial console (existing lab `root` / `routeradmin` login):
+
+~~~bash
+fixture-db-query public
+fixture-db-query "public' OR '1'='1"
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh thermostat
+~~~
+
+Expected: normal input prints only `public|SYNTHETIC_PUBLIC_FIXTURE_DATA`;
+injection prints that plus `internal|SYNTHETIC_INTERNAL_FIXTURE_DATA`, in ID
+order. Both return 0; warning goes to stderr. The regression prints six `PASS`
+lines and exits 0, executing every lookup without privileges and leaving the
+read-only database unchanged.
+
+Offline image verification (host, using the existing builder's native tool):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-c-sql-injection.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/thermostat-cwe089-c-sql-injection/qemuarm64/iotbench-thermostat-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. The debugfs path above is for the current aarch64
+builder host, independent of the target CPU; use its `x86_64` counterpart on an
+x86_64 builder, or `--debugfs debugfs` if installed on PATH. Automatic disposable
+runtime test (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device thermostat
+~~~
+
+Expected: one host `PASS` and six guest groups saved in
+`deploy-images/thermostat-cwe089-c-sql-injection/qemuarm64/validation-console.log`.
+The default compressed rootfs is
+`deploy-images/thermostat-cwe089-c-sql-injection/qemuarm64/iotbench-thermostat-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.

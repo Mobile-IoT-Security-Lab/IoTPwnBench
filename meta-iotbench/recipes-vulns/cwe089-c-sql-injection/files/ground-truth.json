@@ -1,0 +1,34 @@
+{
+  "label": "Vulnerable C Binaries — SQL injection",
+  "cwe": "CWE-89",
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "executable": "@BINDIR@/fixture-db-query",
+  "source": "fixture-db-query.c",
+  "database": "@DATADIR@/iotbench/c-sql-injection/fixture.db",
+  "table": "fixture_records",
+  "columns": [
+    "id",
+    "record_name",
+    "record_value",
+    "visibility"
+  ],
+  "source_expression": "argv[1] -> input",
+  "construction": "snprintf(query, sizeof(query), ... WHERE record_name = '%s' ORDER BY id;, input)",
+  "missing_protection": "No SQL parameter binding or SQL escaping",
+  "sinks": [
+    "sqlite3_prepare_v2(db, query, -1, &stmt, &tail)",
+    "sqlite3_step(stmt)"
+  ],
+  "normal_input": "public",
+  "injection_input": "public' OR '1'='1",
+  "normal_output": [
+    "public|SYNTHETIC_PUBLIC_FIXTURE_DATA"
+  ],
+  "injection_output": [
+    "public|SYNTHETIC_PUBLIC_FIXTURE_DATA",
+    "internal|SYNTHETIC_INTERNAL_FIXTURE_DATA"
+  ],
+  "consequence": "Modified SELECT logic returns an additional synthetic internal record",
+  "scope": "Fixed read-only database, single SELECT, synthetic-table-only authorizer, disabled extension loading, bounded work and output; no privileges or networking",
+  "remediation": "Use WHERE record_name = ?; prepare, sqlite3_bind_text, then step in a separate corrected variant"
+}

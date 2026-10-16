@@ -904,6 +904,184 @@ The exact ground-truth label is **Vulnerable Bash files — Path Traversal**.
 See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal-cwe-22)
 for filesystem mappings, per-device data flows, remediation and local tests.
 
+### Vulnerable C Binaries — SQL injection (CWE-89)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+All eleven profiles have a separate `<device>-cwe089-c-sql-injection` image.
+The native `/usr/bin/fixture-db-query` executable interpolates its first argument
+into a SELECT query with `snprintf()`, without SQL parameter binding or escaping,
+then calls `sqlite3_prepare_v2()` and `sqlite3_step()`. The fixed SQLite database
+contains only two synthetic records and is opened with `SQLITE_OPEN_READONLY`.
+Normal input `public` returns only the public marker; `public' OR '1'='1`
+returns both public and internal markers. The vulnerability is entirely in C.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `envsensor-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `healthmonitor-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `ipcamera-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `plc-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `router-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `smartbulb-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `smarthub-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `smartplug-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `smartspeaker-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+| `thermostat-cwe089-c-sql-injection` | CWE-89 | Native C synthetic SQLite lookup SQL injection |
+
+#### Manual SQL injection test
+
+**1. Build on the host.** Run from the repository root. If this image has
+already been exported, continue with step 2. The default target is `qemuarm64`.
+
+~~~bash
+FIRMWARE=router-cwe089-c-sql-injection docker compose run --rm yocto
+~~~
+
+**2. Boot on the host.** QEMU and `zstd` must be installed on the host:
+
+~~~bash
+FIRMWARE=router-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+On an Apple Silicon Mac, use this accelerated command instead. Port `18080`
+is the host port for the existing dashboard:
+
+~~~bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  FIRMWARE=router-cwe089-c-sql-injection ./scripts/run-qemu.sh
+~~~
+
+**3. Log into the guest serial console.** Wait for `qemuarm64 login:` in the
+same terminal and enter the existing lab credentials:
+
+~~~text
+login: root
+password: routeradmin
+~~~
+
+Run the following steps at the guest prompt, `root@qemuarm64:~#`.
+The SQL lookup is a local firmware CLI test; no browser or HTTP request is needed.
+
+**4. Check the installed executable and database (guest):**
+
+~~~sh
+stat -c '%u:%g:%a' /usr/bin/fixture-db-query
+stat -c '%u:%g:%a' /usr/share/iotbench/c-sql-injection/fixture.db
+~~~
+
+Expected output, respectively:
+
+~~~text
+0:0:755
+0:0:444
+~~~
+
+**5. Run the normal lookup (guest):**
+
+~~~sh
+fixture-db-query public
+echo "exit=$?"
+~~~
+
+Expected stdout:
+
+~~~text
+public|SYNTHETIC_PUBLIC_FIXTURE_DATA
+exit=0
+~~~
+
+The internal record must not appear. Each helper invocation also prints the
+fixture warning to stderr, so it appears above the result in the console:
+
+~~~text
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+~~~
+
+**6. Run the SQL injection lookup (guest).** Keep the double quotes around
+the entire argument so its spaces and single quotes reach the C binary intact:
+
+~~~sh
+fixture-db-query "public' OR '1'='1"
+echo "exit=$?"
+~~~
+
+Expected stdout, in this order:
+
+~~~text
+public|SYNTHETIC_PUBLIC_FIXTURE_DATA
+internal|SYNTHETIC_INTERNAL_FIXTURE_DATA
+exit=0
+~~~
+
+The extra internal marker demonstrates the vulnerability: the argument changes
+the WHERE condition to `record_name = 'public' OR '1'='1'`, matching both
+synthetic rows. The database remains read-only.
+
+**7. Verify the same behavior without root privileges (guest):**
+
+~~~sh
+setpriv --reuid=65534 --regid=65534 --clear-groups \
+  /usr/bin/fixture-db-query "public' OR '1'='1"
+echo "exit=$?"
+~~~
+
+Expected: the same two record lines and `exit=0`, plus the fixture warning.
+The helper has ordinary permissions and needs no SUID or sudo grant.
+
+**8. Run the full guest regression (optional):**
+
+~~~sh
+sh /usr/share/iotbench/c-sql-injection/test-guest.sh router
+echo "exit=$?"
+~~~
+
+Expected: six `PASS` lines and `exit=0`. The regression runs all lookups as
+UID/GID 65534, compares exact normal/injection results, checks malformed and
+oversized inputs, and verifies unchanged database contents with no journal
+sidecars. Warning lines and lookup-failure messages for deliberate negative
+cases are expected; the six `PASS` lines and final exit status determine success.
+
+**9. Close QEMU.** Press **Ctrl-A**, release the keys, then press **X**.
+The default disposable snapshot discards guest writes on exit.
+
+For another device, replace `router` in the firmware ID and the regression's
+device argument with any device from the table above. The lookup executable,
+payloads, database path and expected record output are identical. Use the same
+`YOCTO_MACHINE` when building and booting a different target architecture.
+
+#### Automated SQL injection tests and batch builds
+
+For automated disposable boots, separately from manual QEMU:
+
+~~~bash
+python3 scripts/test-c-sql-injection.py --device router
+python3 scripts/test-c-sql-injection.py --all
+# Apple Silicon acceleration and alternative existing service ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-c-sql-injection.py --all
+~~~
+
+Build all eleven with the existing builder and export convention:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe089-c-sql-injection.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+`YOCTO_MACHINE` selects the existing architecture/toolchain; default `qemuarm64`.
+Exports are under `deploy-images/<device>-cwe089-c-sql-injection/<machine>/`;
+`scripts/build-all.sh` discovers the recipes automatically. Each image installs
+only `cwe089-c-sql-injection` as its vulnerability package and retains the
+existing device profile and peripherals. SQLite is supplied by the pinned
+OpenEmbedded core layer; no additional layer or target SQLite CLI is needed.
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--sql-injection-cwe-89)
+for per-device sources, schema, exact flow, offline tests and remediation.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
