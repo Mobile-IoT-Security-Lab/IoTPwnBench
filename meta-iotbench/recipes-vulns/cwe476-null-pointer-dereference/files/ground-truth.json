@@ -1,0 +1,42 @@
+{
+  "label": "Vulnerable C Binaries — Null Pointer Dereference",
+  "cwe": "CWE-476",
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "executable": "@BINDIR@/fixture-device-info",
+  "source": "fixture-device-info.c",
+  "source_expression": "argv[1] -> input",
+  "input_line": 38,
+  "lookup_function": "lookup_record",
+  "null_return_line": 26,
+  "nullable_assignment": "const fixture_record_t *record = lookup_record(input);",
+  "assignment_line": 39,
+  "missing_protection": "No NULL check between lookup_record(input) and record->id",
+  "sink": "record->id",
+  "dereference_line": 43,
+  "normal_input": "public",
+  "missing_input": "missing-record",
+  "records": [
+    {
+      "id": 1,
+      "name": "public",
+      "value": "SYNTHETIC_PUBLIC_FIXTURE_DATA"
+    },
+    {
+      "id": 2,
+      "name": "status",
+      "value": "SYNTHETIC_STATUS_FIXTURE_DATA"
+    }
+  ],
+  "flow": [
+    "input \"missing-record\"",
+    "lookup_record(input)",
+    "return NULL",
+    "record = NULL",
+    "no NULL check",
+    "record->id",
+    "Null Pointer Dereference"
+  ],
+  "consequence": "C undefined behavior; typically a process SIGSEGV on Linux",
+  "scope": "Compiled synthetic records only; no files, network, commands, credentials or privileges",
+  "remediation": "Check record == NULL and return an error before accessing any member, in a separate corrected variant"
+}

@@ -1082,6 +1082,235 @@ OpenEmbedded core layer; no additional layer or target SQLite CLI is needed.
 See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--sql-injection-cwe-89)
 for per-device sources, schema, exact flow, offline tests and remediation.
 
+### Vulnerable C Binaries — Null Pointer Dereference (CWE-476)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+Every device has a separate local native C fixture. `/usr/bin/fixture-device-info`
+looks up `argv[1]` in two compiled synthetic records. `public` and `status` return
+valid pointers; `missing-record` returns `NULL`. The caller deliberately omits
+NULL validation before accessing `record->id`. This input-dependent lookup and
+unchecked member load are the sole intended weakness. The helper reads no files,
+executes no commands, uses no network and needs no privileges.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `envsensor-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `healthmonitor-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `ipcamera-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `plc-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `router-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `smartbulb-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `smarthub-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `smartplug-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `smartspeaker-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+| `thermostat-cwe476-null-pointer-dereference` | CWE-476 | Native C nullable record lookup and unchecked dereference |
+
+Build and run static verification from the repository root:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+FIRMWARE=router-cwe476-null-pointer-dereference docker compose run --rm yocto
+~~~
+
+The static check requires GCC's interprocedural analyzer to report CWE-476 on
+the exact input → lookup → NULL return → unchecked `record->id` path. A temporary
+corrected control must have no CWE-476 diagnostic. The firmware remains vulnerable.
+
+Inspect an exported image without executing it:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe476-null-pointer-dereference/qemuarm64/iotbench-router-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+The `debugfs` path is for an aarch64 builder host; use its `x86_64` counterpart
+on an x86_64 builder. `--machine` selects the expected ELF target;
+`--objdump` accepts the corresponding cross-objdump for other targets.
+Optional isolated runtime validation, separately from a manually running guest:
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device router
+python3 scripts/test-null-pointer-dereference.py --all
+~~~
+
+The runner uses disposable QEMU snapshots and stores each console log beside
+the image. Guest tests run the helper without privileges, verify valid output
+and argument handling, then use a separate Linux diagnostic supervisor to
+confirm the kernel's SIGSEGV fault address is zero and the child terminates by
+SIGSEGV. Core dumps are disabled and each subprocess has a timeout. Source
+analysis and ELF inspection provide independent evidence beyond the crash.
+
+All images retain their existing device profile and install only
+`cwe476-null-pointer-dereference` as the vulnerability package. Exports go to
+`deploy-images/<device>-cwe476-null-pointer-dereference/<machine>/`.
+`YOCTO_MACHINE` selects the architecture and `scripts/build-all.sh` discovers
+the recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--null-pointer-dereference-cwe-476)
+for each device, exact source locations, remediation and validation results.
+
+### Vulnerable C Binaries — Integer Overflow (CWE-190)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+Each device has a separate `<device>-cwe190-integer-overflow` image containing
+`/usr/bin/fixture-batch-size`, compiled from its matching C source with the
+existing Yocto target toolchain. The utility parses one decimal record count
+as `uint32_t`, multiplies by a fixed 1024-byte record size without checking
+arithmetic bounds, and compares the wrapped total with a synthetic 4096-byte
+capacity. Input `2` yields 2048 and is accepted; `4194304` has mathematical
+total 4294967296, wraps to 0, and is incorrectly accepted. The wrapped value
+is used only for reporting and this simulated decision.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `envsensor-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `healthmonitor-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `ipcamera-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `plc-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `router-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `smartbulb-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `smarthub-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `smartplug-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `smartspeaker-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+| `thermostat-cwe190-integer-overflow` | CWE-190 | Native C unchecked uint32_t batch-size multiplication |
+
+#### Manual integer-overflow test
+
+This fixture is tested in the **QEMU guest serial console**. The web dashboard
+shown at the forwarded HTTP address has no panel for this local C utility.
+
+**1. Build on the host, if needed.** Run from the repository root. Skip this
+command if the firmware has already been exported:
+
+~~~bash
+FIRMWARE=router-cwe190-integer-overflow docker compose run --rm yocto
+~~~
+
+**2. Boot on the host.** QEMU and `zstd` must be installed:
+
+~~~bash
+FIRMWARE=router-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+On an Apple Silicon Mac, use this accelerated command instead:
+
+~~~bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+FIRMWARE=router-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+**3. Log into the guest.** In the same terminal, wait for `qemuarm64 login:`
+and enter the existing lab credentials:
+
+~~~text
+login: root
+password: routeradmin
+~~~
+
+Run the remaining commands **inside the guest**, at `root@qemuarm64:~#`.
+
+**4. Test normal arithmetic:**
+
+~~~sh
+fixture-batch-size 2
+echo "exit=$?"
+~~~
+
+Expected stdout:
+
+~~~text
+record_count = 2
+record_size = 1024
+total_size = 2048
+max_capacity = 4096
+Synthetic batch accepted
+exit=0
+~~~
+
+Every invocation also prints the intentional-fixture warning to stderr.
+
+**5. Trigger integer overflow:**
+
+~~~sh
+fixture-batch-size 4194304
+echo "exit=$?"
+~~~
+
+Expected stdout:
+
+~~~text
+record_count = 4194304
+record_size = 1024
+total_size = 0
+max_capacity = 4096
+Synthetic batch accepted
+exit=0
+~~~
+
+The correct mathematical total is `4194304 * 1024 = 4294967296`, which exceeds
+`UINT32_MAX` (`4294967295`). Unchecked unsigned multiplication wraps to zero,
+so the simulated capacity decision incorrectly accepts the batch. The exact
+wrong total and decision demonstrate CWE-190; the program terminates normally.
+
+**6. Check ordinary capacity rejection and malformed input:**
+
+~~~sh
+fixture-batch-size 5
+echo "exit=$?"
+fixture-batch-size abc
+echo "exit=$?"
+~~~
+
+Input `5` prints `total_size = 5120`, `Synthetic batch exceeds capacity` and
+`exit=0`: capacity rejection is a valid calculation. Input `abc` prints usage
+to stderr, no numerical result, and `exit=2`. A value outside the input type's
+range, such as `4294967296`, also returns 2. The valid overflow witness
+`4194304` passes input conversion and reaches the unchecked multiplication.
+
+**7. Run the complete guest regression (optional):**
+
+~~~sh
+sh /usr/share/iotbench/integer-overflow/test-guest.sh router
+echo "exit=$?"
+~~~
+
+The regression checks exact numerical results and decisions, parsing and range
+errors, arithmetic boundaries and execution as UID/GID 65534 with cleared
+groups. Expected: six `PASS` lines and `exit=0`.
+
+**8. Close QEMU.** Press **Ctrl-A**, release the keys, then press **X**.
+The default disposable snapshot discards guest writes on exit.
+
+For another device, replace `router` in the firmware ID and the regression's
+device argument with a device from the table above. The executable, inputs
+and expected numerical output are identical. Use the same `YOCTO_MACHINE`
+when building and booting another target architecture.
+
+#### Automated integer-overflow checks
+
+Run these commands on the host, separately from a manually running QEMU guest:
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device router
+python3 scripts/test-integer-overflow.py --all
+python3 scripts/test-integer-overflow.py --local --sanitize
+~~~
+
+The last command builds a separate host test executable and requires Clang's
+unsigned-overflow diagnostic at the exact multiplication plus a clean corrected
+temporary control. The installed firmware remains vulnerable and uninstrumented.
+Every image installs only `cwe190-integer-overflow` as its vulnerability package,
+retaining the existing device profile, native services and simulator.
+`YOCTO_MACHINE` selects the existing architecture; exports land under
+`deploy-images/<device>-cwe190-integer-overflow/<machine>/`.
+`scripts/build-all.sh` discovers all eleven recipes automatically.
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--integer-overflow-cwe-190)
+for per-device sources, exact flow, batch builds, offline ELF checks, remediation
+and completed verification results.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in

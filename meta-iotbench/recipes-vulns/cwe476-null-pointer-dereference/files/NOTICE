@@ -1,0 +1,9 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+Ground truth: Vulnerable C Binaries — Null Pointer Dereference
+CWE-476: NULL Pointer Dereference
+
+fixture-device-info performs only a lookup in two compiled synthetic records.
+public succeeds; missing-record returns NULL and reaches unchecked record->id.
+Run only in a disposable local guest. Disable core dumps before crash testing.
+test-null-dereference is a separate unprivileged Linux diagnostic supervisor.

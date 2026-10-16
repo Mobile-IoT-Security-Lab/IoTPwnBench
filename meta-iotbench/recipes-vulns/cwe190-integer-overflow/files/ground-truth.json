@@ -1,0 +1,46 @@
+{
+  "label": "Vulnerable C Binaries — Integer Overflow",
+  "cwe": "CWE-190",
+  "classification": "CWE-190: Integer Overflow or Wraparound",
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT",
+  "executable": "@BINDIR@/fixture-batch-size",
+  "source": "fixture-batch-size.c",
+  "installed_source": "@DATADIR@/iotbench/integer-overflow/fixture-batch-size.c",
+  "input": "argv[1]: one nonempty unsigned decimal value representable as uint32_t",
+  "integer_type": "uint32_t",
+  "maximum": 4294967295,
+  "record_size": 1024,
+  "max_capacity": 4096,
+  "operation": "record_count * record_size",
+  "input_line": 46,
+  "conversion_line": 24,
+  "arithmetic_line": 35,
+  "assignment_line": 51,
+  "decision_line": 56,
+  "missing_validation": "No check of record_count <= UINT32_MAX / record_size before calculate_total multiplication. Input conversion range validation remains correct.",
+  "normal": {
+    "input": "2",
+    "mathematical_total": 2048,
+    "stored_total": 2048,
+    "decision": "accepted",
+    "exit": 0
+  },
+  "overflow": {
+    "input": "4194304",
+    "mathematical_total": 4294967296,
+    "stored_total": 0,
+    "decision": "accepted",
+    "correct_decision": "exceeds capacity",
+    "exit": 0
+  },
+  "flow": [
+    "argv[1]",
+    "parse_record_count / strtoumax",
+    "uint32_t record_count",
+    "calculate_total(record_count, 1024)",
+    "unchecked uint32_t multiplication",
+    "uint32_t total_size wraps to 0",
+    "synthetic capacity comparison incorrectly accepts"
+  ],
+  "remediation": "For nonzero record_size check record_count <= UINT32_MAX / record_size before multiplication; reject unrepresentable totals and use only validated results. Checked arithmetic or a sufficient wider type are alternatives."
+}

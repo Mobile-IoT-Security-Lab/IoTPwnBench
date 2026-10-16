@@ -11,6 +11,14 @@ fixtures model unvalidated local path concatenation in a firmware Bash helper.
 The [Vulnerable C Binaries — SQL injection](#vulnerable-c-binaries--sql-injection-cwe-89)
 fixtures model native C argument interpolation into a local SQLite SELECT.
 
+The [Vulnerable C Binaries — Null Pointer Dereference](#vulnerable-c-binaries--null-pointer-dereference-cwe-476)
+fixtures model an input-dependent record lookup returning a pointer that is
+subsequently dereferenced without NULL validation.
+
+The [Vulnerable C Binaries — Integer Overflow](#vulnerable-c-binaries--integer-overflow-cwe-190)
+fixtures model validated numeric input reaching unchecked uint32_t multiplication
+and a synthetic capacity decision that uses the wrapped result.
+
 ## Weak Cipher: 3DES Device Backups
 
 These images implement intentionally vulnerable device backup encryption under
@@ -7751,3 +7759,2250 @@ Expected: one host `PASS` and six guest groups saved in
 The default compressed rootfs is
 `deploy-images/thermostat-cwe089-c-sql-injection/qemuarm64/iotbench-thermostat-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
+
+## Vulnerable C Binaries — Null Pointer Dereference (CWE-476)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario and source-to-sink ground truth
+
+Exact ground-truth label: **Vulnerable C Binaries — Null Pointer Dereference**.
+Classification: **CWE-476: NULL Pointer Dereference**. Eleven independent image
+recipes combine each existing device profile with the single vulnerability
+package `cwe476-null-pointer-dereference`. Their purpose is offline, authorized
+static-analysis research using synthetic firmware. Runtime validation is optional
+and confined to disposable local environments.
+
+The harmless operation is a named lookup of synthetic device information.
+`fixture-device-info.c` contains the entire vulnerable flow; it is stored in
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/` and installed
+with its matching native ELF executable. No runtime switch selects other flaws.
+
+| Ground-truth element | Exact location in `fixture-device-info.c` |
+| --- | --- |
+| Synthetic records | Lines 12–15: ID 1, `public`, `SYNTHETIC_PUBLIC_FIXTURE_DATA`; ID 2, `status`, `SYNTHETIC_STATUS_FIXTURE_DATA` |
+| Argument validation | Lines 33–36: require exactly one record-name argument before reading `argv[1]` |
+| External input | Line 38: `const char *input = argv[1];` |
+| Pointer-returning lookup | Lines 17–27: `lookup_record(const char *name)` loops over both records and uses `strcmp()` |
+| Found-record pointer | Line 23: `return &records[i];` |
+| Reachable NULL return | Line 26: `return NULL;` after every comparison fails |
+| Nullable result variable | Line 39: `const fixture_record_t *record = lookup_record(input);` |
+| Intentionally missing validation | Between assignment at line 39 and first member access at line 43; explicit comment at lines 41–42 |
+| First unsafe sink | Line 43: `printf("Record ID: %d\n", record->id);` |
+| Subsequent member access | Line 44: `record->value` (the first access already faults for NULL on the tested target) |
+
+Representative vulnerable flow, identical in every device:
+
+`input "missing-record"` → `lookup_record(input)` → `return NULL` →
+`record = NULL` → `no NULL check` → `record->id` → `Null Pointer Dereference`.
+
+`missing-record` is absent from the compiled table, so ordinary lookup logic
+selects the NULL path. There is no hardcoded unconditional NULL assignment,
+manual fault signal, `abort()`, fallback record, default pointer, input allowlist,
+defensive replacement or early return protecting this path. Unknown names,
+including the empty string, also reach the same intended defect. There is no
+input copy, input-sized allocation or writable input buffer. Loops are bounded
+by the initialized table; output format strings are constant.
+
+Expected static finding: a user-controlled argument reaches a pointer-returning
+lookup, whose unsuccessful-search path returns NULL to local variable `record`;
+the caller reaches its structure-member load without a NULL check. Merely
+accepting input, using pointers, returning NULL or crashing does not establish
+this relationship. The complete input-dependent flow is required.
+
+This is native C, with neither Java/JAR applications nor Java Null Pointer
+Exceptions. Bash and Python files are test harnesses only. It differs from
+unspecified generic vulnerable C binaries and generic application crashes because
+the precise nullable return and unchecked structure-member access are identified.
+It is not a buffer overflow, use-after-free, double-free, uninitialized pointer,
+out-of-bounds access or arbitrary pointer dereference: the only possible result
+is a pointer to one of two initialized static records or NULL. There are no
+user-selected addresses, frees, heap allocations or arbitrary memory writes.
+It is not command injection, SQL Injection, Path Traversal, an unsafe sudo helper
+or privilege escalation; the utility invokes no command, database, filename,
+network or privilege API. Safe C pointer users, argument consumers without a
+nullable-pointer operation, and callers checking NULL before use do not satisfy
+this ground truth. An unconditional hardcoded NULL dereference also lacks this
+fixture's meaningful input-dependent search.
+
+### Firmware packaging and compilation
+
+| Artifact | Firmware path |
+| --- | --- |
+| Vulnerable native C executable, root:root 0755 | `/usr/bin/fixture-device-info` |
+| Corresponding source | `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c` |
+| Diagnostic test executable, root:root 0755 | `/usr/share/iotbench/null-pointer-dereference/test-null-dereference` |
+| Supporting assets, root:root 0644 | `test-null-dereference.c`, `test-guest.sh`, `ground-truth.json`, `NOTICE`, `LICENSE` in that same directory |
+
+Records are compiled into the C executable, with no external metadata database.
+The helper only compares names and prints artificial values. It opens no files,
+contacts no service, reads no credentials, changes no configuration and requires
+no root privilege. It installs no daemon, persistence, sudo rule or elevated file
+permission. Existing device services/peripherals come from the unchanged profiles.
+
+The package follows the existing `${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}`
+Yocto cross-compilation convention with `virtual/libc`; no external library or
+new layer is needed. The vulnerable helper appends `-O0 -g -fno-inline -fno-lto`
+to preserve the lookup call, nullable return and member loads. Package stripping
+is inhibited so `lookup_record` and `records` remain recognizable. The normal
+Yocto debug package handling still applies. The firmware executable has no
+sanitizer runtime dependency. `busybox` and `util-linux-setpriv` support the
+existing guest test convention. The pinned BusyBox configuration omits `timeout`,
+so the existing C test supervisor supplies its own watchdog using `alarm()`.
+All dependencies are supplied by pinned layers; the vulnerable utility itself
+only needs libc.
+Only this buffer-free helper also uses `-U_FORTIFY_SOURCE`: glibc's fortify
+wrappers require optimization and otherwise reject the intentional `-O0` build
+under `-Werror`. The other Yocto hardening flags remain in place; the diagnostic
+supervisor uses the normal optimized flags and fortify setting.
+
+`NOTICE`, image description, `/etc/motd` and helper stderr carry the exact
+warning above. Source locations and records are also recorded in the installed
+`ground-truth.json`. The image postprocess asserts ordinary 0755 helper ownership
+and permissions. Recipes remain target-architecture independent.
+
+### Build and static verification
+
+Run these commands from the repository root:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe476-null-pointer-dereference'
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe476-null-pointer-dereference.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+`--static` compiles a temporary copy with GCC `-fanalyzer` and requires one
+`-Wanalyzer-null-dereference` diagnostic carrying CWE metadata 476 at line 43.
+Its interprocedural diagnostic must include input line 38, lookup call/result
+line 39, NULL return line 26 and sink line 43. It prints the diagnostic path and
+checks machine-readable ground truth plus all eleven device recipes. A second,
+temporary corrected control inserts a NULL check and must produce no CWE-476
+finding. The installed vulnerable source is never modified by this test.
+
+Offline image validation uses `debugfs` without mounting or executing firmware:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe476-null-pointer-dereference/qemuarm64/iotbench-router-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Expected: two `PASS` lines. It checks ELF architecture, preserved lookup symbols
+and native call from `main`, both synthetic records, exact installed C sources,
+metadata/test assets, ordinary file permissions, device identity and login warning.
+For standard export filenames it also matches the installed device to the image
+name, and compares the installed identity and peripheral files with that profile.
+It prints the helper SHA-256. Disassembly inspection supports preservation of the
+compiled flow; the GCC finding establishes the source-level defect. This is not
+a claim that a binary-only analyzer independently recovered CWE-476.
+
+The example `debugfs` path is for an aarch64 builder host, independent of target
+architecture. Use `x86_64` on an x86_64 builder or `--debugfs debugfs` if on PATH.
+Default target is `qemuarm64`; use `YOCTO_MACHINE` consistently for builds and
+boots, and `--machine` plus a matching `--objdump` for offline inspection of
+`qemuarm`, `qemux86-64`, `qemux86` or `qemumips`. The shared `scripts/build-all.sh`
+automatically discovers every new image recipe.
+
+### Optional isolated runtime verification
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device router
+python3 scripts/test-null-pointer-dereference.py --all
+# Optional acceleration on Apple Silicon, using unused device-service ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-null-pointer-dereference.py --all
+~~~
+
+Run separately from manual QEMU. The existing serial-console harness boots a
+fresh snapshot, uses the existing `root` / `routeradmin` lab login only to run
+tests, and shuts QEMU down in `finally`. Each export receives a raw
+`validation-console.log`. The helper itself has no network surface.
+
+Inside a manually booted guest, run `sh
+/usr/share/iotbench/null-pointer-dereference/test-guest.sh router` on one line.
+The five guest assertion groups check native installation, valid deterministic
+`public` and `status` output, argument-count errors, the kernel-confirmed NULL
+fault, and unprivileged execution with core dumps disabled. All helper processes
+use UID/GID 65534 with cleared groups. The dedicated C test supervisor applies
+a five-second watchdog and `RLIMIT_CORE=0` to each helper invocation. Its `--run`
+mode forwards record arguments to the fixed executable and preserves its exit
+status for valid-record and argument-count tests. With no arguments it forks the
+fixed helper with `missing-record` and uses Linux `ptrace` to observe its actual
+SIGSEGV. It requires `si_addr == NULL` and `si_code == SEGV_MAPERR`, forwards the
+original kernel signal, then verifies signal termination. `PTRACE_O_EXITKILL`
+also kills the traced child if the supervisor exits. The supervisor is test
+infrastructure; it does not generate the fault or implement the vulnerability.
+
+Expected valid output (stdout), with exit status 0:
+
+~~~text
+Record ID: 1
+Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA
+~~~
+
+`status` prints ID 2 and `SYNTHETIC_STATUS_FIXTURE_DATA`. Missing/extra arguments
+return 2 before accessing `argv[1]`. `missing-record` reaches C undefined behavior;
+on the tested Linux target it should fault on `record->id` at address zero. The
+supervisor's exact success marker is
+`NULL_DEREFERENCE_CONFIRMED signal=SIGSEGV address=0 code=SEGV_MAPERR`.
+A generic nonzero exit is insufficient. Other architectures or compiler settings
+need independent verification; a missing ptrace facility is a runtime test
+limitation, not a passing result. Static verification remains available.
+
+### Safe remediation
+
+A separate secure version must validate the nullable lookup result before use:
+
+~~~c
+const fixture_record_t *record = lookup_record(input);
+if (record == NULL) {
+    fprintf(stderr, "Record not found\n");
+    return 1;
+}
+printf("Record ID: %d\n", record->id);
+~~~
+
+Whenever a pointer-returning function can return NULL, check that result before
+accessing the referenced object. Keep ordinary argument validation as well.
+Do not apply this correction to the intentionally vulnerable firmware fixture.
+
+### Completed validation
+
+On 2026-10-16, all eleven `qemuarm64` fixtures built and exported successfully
+with the pinned Yocto builder after clean layer parsing and a router dependency
+dry run. Both native C executables compiled with `-Wall -Wextra -Werror`.
+Every exported manifest contains its correct device profile, `iotbench-sim`,
+and exactly one vulnerability package: `cwe476-null-pointer-dereference`.
+
+GCC's interprocedural `-fanalyzer` produced exactly one
+`-Wanalyzer-null-dereference` finding with CWE metadata 476. Its diagnostic path
+includes `argv[1]` at line 38, the lookup/assignment at line 39, the NULL return
+at line 26, and the unchecked `record->id` at line 43. A temporary corrected
+control with a NULL check produced no CWE-476 finding. The installed vulnerable
+source was left unchanged.
+
+Offline inspection passed for all eleven compressed ext4 images: target-native
+ELF architecture, preserved lookup symbols and call from `main`, synthetic
+record values, exact installed C sources/metadata/test assets, ordinary file
+permissions, matching device identity/peripherals and required image warning.
+The vulnerable helper is byte-identical across all eleven images, with SHA-256
+`0e5198c3e75c26282926cc41d797501a783a1b34dd3a1a3a00a4502b8455aba8`.
+
+All eleven images then booted as disposable QEMU snapshots with HVF/host CPU
+and passed all five guest assertion groups, **55 groups total**. Valid records
+returned their exact deterministic values; missing/extra arguments returned 2.
+For `missing-record`, the supervisor observed kernel SIGSEGV at address zero
+with `SEGV_MAPERR`, forwarded that signal and confirmed actual signal termination.
+Every helper invocation ran as UID/GID 65534 with cleared groups, a five-second
+watchdog and core dumps disabled. Guest regressions all returned zero. Tests
+used the local serial console and existing host-loopback service ports HTTP
+`18080`, MQTT `21883` and Modbus/TCP `11502`; the utility itself uses no network.
+
+The [local validation report](../deploy-images/cwe476-validation/report.txt)
+lists the generated repository files, every device's results, and SHA-256 checksums
+for source files, compressed rootfs, kernel, manifest and validation logs.
+Shared parse/static-analysis logs are under `deploy-images/cwe476-validation/`.
+Each device export contains `build.log`, `rootfs.manifest`,
+`validation-offline.log`, `validation-runtime.log` and `validation-console.log`.
+Other supported architectures were not built or boot-tested. The static finding
+comes from GCC source analysis; no independent binary-only CWE analyzer was run.
+
+### doorlock-cwe476-null-pointer-dereference
+
+Simulated category: **access-control door lock**. Existing device directory:
+`meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
+`deploy-images/doorlock-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-doorlock-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-doorlock-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/doorlock-cwe476-null-pointer-dereference/qemuarm64/iotbench-doorlock-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device doorlock
+~~~
+
+For manual boot use `FIRMWARE=doorlock-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh doorlock`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/doorlock-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### envsensor-cwe476-null-pointer-dereference
+
+Simulated category: **environmental sensor**. Existing device directory:
+`meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
+`deploy-images/envsensor-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-envsensor-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-envsensor-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/envsensor-cwe476-null-pointer-dereference/qemuarm64/iotbench-envsensor-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device envsensor
+~~~
+
+For manual boot use `FIRMWARE=envsensor-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh envsensor`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/envsensor-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### healthmonitor-cwe476-null-pointer-dereference
+
+Simulated category: **health monitor**. Existing device directory:
+`meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
+`deploy-images/healthmonitor-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-healthmonitor-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-healthmonitor-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/healthmonitor-cwe476-null-pointer-dereference/qemuarm64/iotbench-healthmonitor-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device healthmonitor
+~~~
+
+For manual boot use `FIRMWARE=healthmonitor-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh healthmonitor`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/healthmonitor-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### ipcamera-cwe476-null-pointer-dereference
+
+Simulated category: **surveillance IP camera**. Existing device directory:
+`meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
+`deploy-images/ipcamera-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-ipcamera-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-ipcamera-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/ipcamera-cwe476-null-pointer-dereference/qemuarm64/iotbench-ipcamera-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device ipcamera
+~~~
+
+For manual boot use `FIRMWARE=ipcamera-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh ipcamera`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/ipcamera-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### plc-cwe476-null-pointer-dereference
+
+Simulated category: **industrial PLC gateway (OT)**. Existing device directory:
+`meta-iotbench/recipes-devices/plc/`. Firmware directory:
+`deploy-images/plc-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-plc-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-plc-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/plc-cwe476-null-pointer-dereference/qemuarm64/iotbench-plc-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device plc
+~~~
+
+For manual boot use `FIRMWARE=plc-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh plc`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/plc-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### router-cwe476-null-pointer-dereference
+
+Simulated category: **network gateway**. Existing device directory:
+`meta-iotbench/recipes-devices/router/`. Firmware directory:
+`deploy-images/router-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-router-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-router-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe476-null-pointer-dereference/qemuarm64/iotbench-router-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device router
+~~~
+
+For manual boot use `FIRMWARE=router-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh router`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/router-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### smartbulb-cwe476-null-pointer-dereference
+
+Simulated category: **lighting / smart bulb**. Existing device directory:
+`meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
+`deploy-images/smartbulb-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-smartbulb-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartbulb-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartbulb-cwe476-null-pointer-dereference/qemuarm64/iotbench-smartbulb-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device smartbulb
+~~~
+
+For manual boot use `FIRMWARE=smartbulb-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh smartbulb`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/smartbulb-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### smarthub-cwe476-null-pointer-dereference
+
+Simulated category: **controller / smart hub**. Existing device directory:
+`meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
+`deploy-images/smarthub-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-smarthub-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smarthub-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smarthub-cwe476-null-pointer-dereference/qemuarm64/iotbench-smarthub-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device smarthub
+~~~
+
+For manual boot use `FIRMWARE=smarthub-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh smarthub`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/smarthub-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### smartplug-cwe476-null-pointer-dereference
+
+Simulated category: **energy-management smart plug**. Existing device directory:
+`meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
+`deploy-images/smartplug-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-smartplug-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartplug-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartplug-cwe476-null-pointer-dereference/qemuarm64/iotbench-smartplug-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device smartplug
+~~~
+
+For manual boot use `FIRMWARE=smartplug-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh smartplug`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/smartplug-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### smartspeaker-cwe476-null-pointer-dereference
+
+Simulated category: **audio / voice-assistant speaker**. Existing device directory:
+`meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
+`deploy-images/smartspeaker-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-smartspeaker-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-smartspeaker-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartspeaker-cwe476-null-pointer-dereference/qemuarm64/iotbench-smartspeaker-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device smartspeaker
+~~~
+
+For manual boot use `FIRMWARE=smartspeaker-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh smartspeaker`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/smartspeaker-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+### thermostat-cwe476-null-pointer-dereference
+
+Simulated category: **climate-control thermostat**. Existing device directory:
+`meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
+`deploy-images/thermostat-cwe476-null-pointer-dereference/<machine>/`; default image:
+`iotbench-thermostat-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst`, with kernel `Image` beside it.
+Image recipe: `meta-iotbench/recipes-images/iotbench-thermostat-cwe476-null-pointer-dereference.bb`.
+Sole vulnerability package: `cwe476-null-pointer-dereference`.
+
+Native executable: `/usr/bin/fixture-device-info`. Corresponding source:
+`meta-iotbench/recipes-vulns/cwe476-null-pointer-dereference/files/fixture-device-info.c`,
+also installed as `/usr/share/iotbench/null-pointer-dereference/fixture-device-info.c`.
+Its harmless purpose is retrieving predefined synthetic device information.
+Record 1 is `public` / `SYNTHETIC_PUBLIC_FIXTURE_DATA`; record 2 is
+`status` / `SYNTHETIC_STATUS_FIXTURE_DATA`, compiled into the initialized table.
+
+Input `argv[1]` becomes `input` at **line 38**, after the argument-count check.
+**`lookup_record()` at lines 17–27** compares this name against both records.
+An existing name returns its record pointer at **line 23**. Any unknown name,
+including `missing-record`, reaches **`return NULL` at line 26**. Local variable
+**`record` receives the nullable result at line 39**. NULL validation is
+intentionally absent between lines 39 and 43. The first unsafe dereference is
+**`record->id` at line 43**; line 44 subsequently accesses `record->value`.
+
+Expected static-analysis flow: `input "missing-record"` → `lookup_record(input)`
+→ `return NULL` → `record = NULL` → `no NULL check` → `record->id`
+→ `Null Pointer Dereference`. The absent name naturally selects the NULL return,
+and the caller accesses the structure member regardless of lookup success.
+Expected finding: unchecked nullable return from an input-dependent lookup,
+**CWE-476: NULL Pointer Dereference**. Exact ground-truth label:
+**Vulnerable C Binaries — Null Pointer Dereference**.
+Remediation: check `record == NULL` and return an error before any member access,
+as shown in the shared secure alternative; leave this fixture vulnerable.
+
+Build and static validation (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe476-null-pointer-dereference docker compose run --rm yocto
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py --static
+docker compose run --rm yocto python3 /scripts/test-null-pointer-dereference.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/thermostat-cwe476-null-pointer-dereference/qemuarm64/iotbench-thermostat-cwe476-null-pointer-dereference-qemuarm64.rootfs.ext4.zst
+~~~
+
+Optional runtime validation (host, no manually running QEMU):
+
+~~~bash
+python3 scripts/test-null-pointer-dereference.py --device thermostat
+~~~
+
+For manual boot use `FIRMWARE=thermostat-cwe476-null-pointer-dereference
+./scripts/run-qemu.sh` on one line. Inside its guest serial console,
+`fixture-device-info public` prints `Record ID: 1` and
+`Record Value: SYNTHETIC_PUBLIC_FIXTURE_DATA`, exiting 0. Run
+`sh /usr/share/iotbench/null-pointer-dereference/test-guest.sh thermostat`
+for all five isolated guest assertion groups, including the missing-record
+fault at address zero; the script disables core dumps. Use the packaged diagnostic
+supervisor for a bounded manual fault check with core dumps disabled. Shared build/static/
+runtime procedures above apply, including ELF architecture selection and
+unprivileged execution. Per-image runtime results, when available, are in
+`deploy-images/thermostat-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
+the completed-validation section states which results were actually observed.
+
+## Vulnerable C Binaries — Integer Overflow (CWE-190)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scenario and exact ground truth
+
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Classification: **CWE-190: Integer Overflow or Wraparound**.
+Every existing device category has one independent image combining its normal
+profile with the sole vulnerability package `cwe190-integer-overflow`. The
+local firmware utility estimates the size of a synthetic batch of telemetry
+records. Its first command-line argument is the record count. It performs
+only numeric conversion, multiplication, comparison and printing; no network,
+filesystem access, allocation based on input, data copy, command execution,
+configuration change, credential access or elevated privilege is needed.
+The utility adds no daemon, boot service, login account, sudo grant or SUID bit.
+
+The source is
+[`fixture-batch-size.c`](../meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c).
+It uses standard `<stdint.h>` types and `<inttypes.h>` portable conversion and
+printing. `parse_record_count()` accepts only a nonempty string of ASCII digits,
+converts with `strtoumax(..., 10)`, checks `ERANGE`, full consumption and the
+`UINT32_MAX` bound, then assigns the validated value to `uint32_t record_count`.
+Empty, signed, whitespace-bearing, hexadecimal, fractional, malformed and
+out-of-range values return status 2 without numerical stdout. Decimal leading
+zeroes are valid. Missing/extra arguments also return 2. Argument-count checking
+short-circuits before accessing a nonexistent `argv[1]`.
+
+These are **conversion bounds**, not multiplication bounds: valid input
+`4194304` is accepted by the parser. All computations and decisions for valid
+inputs return status 0, including ordinary capacity rejection. The final line
+reports acceptance or rejection; exit status alone does not express capacity.
+
+| Stage | Exact source location and operation |
+| --- | --- |
+| External numeric source | `main`, line 46: `argv[1]` passed to `parse_record_count` |
+| Format and conversion validation | `parse_record_count`, lines 9–31; `strtoumax` at line 24; range test at line 25; validated assignment at line 28 |
+| Fixed operands | Lines 41–42: `uint32_t record_size = 1024`, `uint32_t max_capacity = 4096` (both const) |
+| Vulnerable arithmetic | `calculate_total`, line 35: `return record_count * record_size;` |
+| Intentionally missing protection | Line 34 documents absent multiplication-bound validation; no sufficient check between parsed input and multiplication |
+| Fixed-width destination | Line 51: `uint32_t total_size = calculate_total(record_count, record_size);` |
+| Observable result | Lines 52–55 print count, size, stored total and capacity |
+| Incorrect downstream logic | Line 56: `if (total_size <= max_capacity)`; lines 57–59 print the selected decision |
+
+The multiplication uses 32-bit unsigned operands on all supported targets;
+`calculate_total` returns `uint32_t`. No wider multiplication intermediate,
+checked-arithmetic builtin, saturation, operation-bound input cap or overflow
+rejection protects this path. The largest representable value is
+**4294967295 (`UINT32_MAX`)**; results wrap modulo **4294967296 (2^32)**.
+There is no dependency on undefined signed-integer overflow.
+
+| Input | Exact mathematical total | Stored uint32_t total | Observed decision | Correct capacity decision |
+| --- | --- | --- | --- | --- |
+| `2` | 2048 | 2048 | accepted | accepted |
+| `4` | 4096 | 4096 | accepted | accepted |
+| `5` | 5120 | 5120 | exceeds capacity | exceeds capacity |
+| `4194303` | 4294966272 | 4294966272 | exceeds capacity | exceeds capacity |
+| `4194304` | 4294967296 | 0 | **accepted** | **exceeds capacity** |
+| `4194305` | 4294968320 | 1024 | **accepted** | **exceeds capacity** |
+| `4294967295` | 4398046510080 | 4294966272 | exceeds capacity | exceeds capacity |
+
+Representative vulnerable flow, shared by every device:
+
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → **incorrectly accepted**.
+
+Expected static-analysis data flow: `argv[1]` → validated decimal conversion
+→ `uint32_t record_count` → `calculate_total(record_count, record_size)`
+→ unchecked 32-bit multiplication → `uint32_t total_size` → comparison with
+4096 → printed synthetic decision. Expected finding: **CWE-190**, externally
+controlled arithmetic can exceed the fixed-width destination without overflow
+validation, and subsequent application logic consumes the incorrect result.
+`ground-truth.json` records the exact lines, operands, label and witness.
+The metadata labels are annotations; the arithmetic and its consumer must be
+analyzed to establish the finding.
+
+### Firmware components and compilation
+
+| Artifact | Repository or installed location |
+| --- | --- |
+| Shared package recipe | `meta-iotbench/recipes-vulns/cwe190-integer-overflow/cwe190-integer-overflow_1.0.bb` |
+| Actual native C source | `meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c` |
+| Native executable, root:root 0755 | `/usr/bin/fixture-batch-size` |
+| Identical installed source, root:root 0644 | `/usr/share/iotbench/integer-overflow/fixture-batch-size.c` |
+| Matching annotation and local assets, root:root 0644 | `ground-truth.json`, `NOTICE`, `LICENSE`, `test-guest.sh` in that same data directory |
+| Image metadata include | `meta-iotbench/recipes-images/iotbench-integer-overflow.inc` |
+| Host validation runner | `scripts/test-integer-overflow.py` |
+
+The recipe uses local `file://` sources, `S = "${UNPACKDIR}"`, `virtual/libc`,
+and the normal `${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}` cross compiler and flags.
+It appends `-std=c99 -Wall -Wextra -Werror -O0 -g -fno-inline -fno-lto` to retain
+the parser, arithmetic function, 32-bit multiplication and consumer for firmware
+analysis. Package stripping is inhibited; normal Yocto debug-package handling
+still applies. Only this buffer-free helper undefines `_FORTIFY_SOURCE`, matching
+the existing native fixture convention because glibc fortify requires optimization
+and otherwise fails the intentional `-O0 -Werror` build. Other Yocto hardening
+flags remain. There is no sanitizer dependency in the firmware binary.
+
+The helper uses only libc. BusyBox and `util-linux-setpriv` support guest tests;
+the latter is ordinary non-SUID test infrastructure, never called by the utility.
+No synthetic data file is needed: record size and capacity are fixed constants.
+Device identity and peripheral configuration continue to come from each profile.
+The image include verifies root-owned 0755 executable permissions and appends
+NOTICE to `/etc/motd`. NOTICE, the image description and each utility invocation's
+stderr display the exact warning above.
+
+Recipes are architecture-independent and use the existing `YOCTO_MACHINE`
+selector: default `qemuarm64`, or `qemuarm`, `qemux86-64`, `qemux86`, `qemumips`.
+No architecture, toolchain or unrelated platform component is added. A source
+shared by eleven images follows the existing device × vulnerability architecture;
+each image contains its own installed native executable and corresponding source.
+Exports contain the compressed ext4 rootfs and kernel in each firmware directory.
+Build products under `deploy-images/` remain ignored by Git, following repository
+policy; the package/image recipes and matching sources are the reproducible inputs.
+
+### Local build and deterministic verification
+
+Run host commands from the repository root. Parse the layer and resolve a graph:
+
+~~~bash
+docker compose run --rm yocto bash -lc \
+  'source /opt/yocto/yocto-env.sh && bitbake -p && bitbake -n iotbench-router-cwe190-integer-overflow'
+~~~
+
+Build and export all eleven fixtures with the existing exporter:
+
+~~~bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe190-integer-overflow.bb; do
+    firmware=$(basename "$recipe" .bb)
+    FIRMWARE="${firmware#iotbench-}" docker compose run --rm yocto || exit 1
+done
+~~~
+
+`scripts/build-all.sh` discovers these targets automatically. Use the same
+`YOCTO_MACHINE` at build and boot time when selecting another supported target.
+
+A separate local host build verifies exact numerical output and decisions using
+Python's unlimited-precision arithmetic as the independent oracle. It covers
+74 counts (ten chosen boundary/witness cases plus 64 deterministically seeded
+counts), decimal leading-zero aliases, malformed strings, conversion overflow,
+`UINT32_MAX`, and argument-count errors. It checks status and warning separately.
+
+~~~bash
+python3 scripts/test-integer-overflow.py --local
+python3 scripts/test-integer-overflow.py --local --sanitize
+~~~
+
+`--cc` selects the host compiler. `--sanitize` additionally requires Clang
+(`--clang` selects it), builds a temporary executable with
+`-fsanitize=unsigned-integer-overflow -fno-sanitize-recover=unsigned-integer-overflow`,
+and requires the specific **unsigned integer overflow: 4194304 * 1024** diagnostic
+at source line 35. Input `2` must be clean. A separate temporary corrected control
+adds the pre-multiplication bound check: normal input remains correct and the
+overflow witness / maximum input return 2 with no diagnostic. Neither the
+installed source nor the firmware binary is modified by these diagnostic tests.
+Although the instrumentation is part of Clang's UBSan runtime, unsigned wraparound
+is defined C behavior; its diagnostic does not imply signed undefined behavior.
+These tests demonstrate a concrete arithmetic defect, not a generic failure.
+
+Offline firmware inspection never mounts or executes the image:
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe190-integer-overflow/qemuarm64/iotbench-router-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The `debugfs` path is for the aarch64 **builder host**; use the `x86_64` counterpart
+on that host architecture, or `--debugfs debugfs` when on PATH. `--machine` selects
+the expected target ELF class/endianness/machine; `--objdump` selects a matching
+cross-objdump for other targets. The verifier checks parser and arithmetic calls
+from native `main`, actual 32-bit multiplication in `calculate_total`, preserved
+symbols, decision strings, lack of sanitizer instrumentation, exact installed
+source/assets, device identity/peripherals, ordinary modes and the login warning.
+It prints the helper SHA-256. Disassembly checks corroborate preservation of the
+compiled flow; they are not an independent binary-only CWE-190 analyzer.
+
+For manual testing, boot the selected firmware and use the existing guest serial
+login `root` / `routeradmin`, then run **inside the guest**:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+setpriv --reuid=65534 --regid=65534 --clear-groups fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh router
+~~~
+
+Normal stdout is:
+
+~~~text
+record_count = 2
+record_size = 1024
+total_size = 2048
+max_capacity = 4096
+Synthetic batch accepted
+~~~
+
+Overflow stdout is:
+
+~~~text
+record_count = 4194304
+record_size = 1024
+total_size = 0
+max_capacity = 4096
+Synthetic batch accepted
+~~~
+
+Both commands return 0 with the warning on stderr. `fixture-batch-size 5`
+returns 0 but reports `total_size = 5120` and `Synthetic batch exceeds capacity`.
+The guest test checks six assertion groups: native installation/profile/modes;
+normal arithmetic and decimal aliases; repeated exact overflow plus the incorrect
+decision; arithmetic/capacity boundaries; format/range/count rejections; and
+non-root execution. Every utility invocation runs as UID/GID 65534 with cleared
+groups. It performs no file mutation or host access. Expected: six `PASS` lines,
+exit 0. These bounded synthetic invocations terminate normally without a crash.
+
+For automatic disposable QEMU boots, separately from manually running guests:
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device router
+python3 scripts/test-integer-overflow.py --all
+# Optional Apple Silicon acceleration and unused existing service ports:
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  QEMU_MQTT_PORT=21883 QEMU_MODBUS_PORT=11502 \
+  python3 scripts/test-integer-overflow.py --all
+~~~
+
+The host runner uses the existing serial-console/snapshot harness, runs one
+image at a time, checks all six groups and status, closes QEMU in `finally`,
+and saves `validation-console.log` beside the image. `--timeout` bounds each
+console step. Profile service forwards are host-loopback-only; the calculator
+itself does not use networking. Host QEMU and `zstd` are prerequisites.
+
+### Safe remediation and distinctions
+
+For a separate corrected variant, validate the operation's bounds before
+multiplication and allow downstream logic to consume only a validated result:
+
+~~~c
+if (record_size != 0 && record_count > UINT32_MAX / record_size) {
+    /* Reject an unrepresentable total before computing it. */
+    return 2;
+}
+uint32_t total_size = record_count * record_size;
+~~~
+
+Appropriate checked-arithmetic functions are another option. A wider type is
+sufficient for this calculation if multiplication is performed in that wider
+type (for example `uint64_t`), the full result is validated and comparisons use
+it without truncating it back to 32 bits. Merely assigning an already overflowed
+32-bit product to a wider destination is insufficient. Keep robust parsing and
+ordinary permissions. The corrected variant must preserve `2` → 2048, handle
+capacity rejection correctly, and reject `4194304` or compare its full mathematical
+total 4294967296 with capacity. The known-positive wraparound test must then fail.
+These remediations are documented and used only in a temporary test control;
+the intentionally vulnerable firmware path does not implement them.
+
+These fixtures differ from generic Java/JAR applications and integer overflow
+in unrelated apps: the input-to-arithmetic flow is in a real native C utility
+built by Yocto and installed in each existing device firmware. They differ from
+generic native C binaries, fixed-arithmetic programs and calculations that stay
+within range: external numeric input reaches an actual 32-bit operation with a
+reachable overflowing value and an observable incorrect result/decision. Numeric
+input alone, arithmetic alone, a large representable value, or an unused label
+is insufficient. Programs that correctly check arithmetic bounds do not satisfy
+this ground truth.
+
+They differ from integer underflow and signed conversion issues: input conversion
+is checked, values are nonnegative, there is no subtraction, and the defect is
+unsigned multiplication exceeding `UINT32_MAX`. They differ from buffer overflow,
+heap/stack corruption, out-of-bounds access, NULL dereference and use-after-free:
+the result controls no allocation, copy, pointer offset or index, and the program
+has no dynamic allocation or free. They differ from command injection, SQL
+Injection, Path Traversal and arbitrary command execution: the utility accepts
+no commands, SQL or paths and invokes no process, database or file API. They
+differ from generic application crashes: both witness inputs terminate normally;
+the evidence is exact wraparound and a wrong simulated capacity decision.
+The sole intended weakness is **CWE-190**.
+
+The required relationship is **C binary input + input-dependent arithmetic +
+fixed-width integer type + potential arithmetic overflow + missing overflow
+validation + observable incorrect result**. Its harmless local consequence is
+numerical misreporting and incorrect synthetic acceptance, without a secondary
+memory-safety or privilege weakness.
+
+### Completed validation
+
+On 2026-10-16, all eleven `qemuarm64` fixtures built and exported successfully
+with the pinned Yocto builder after clean BitBake layer parsing and a router
+dependency dry run. The helper compiled with `-Wall -Wextra -Werror` and the
+normal target toolchain. Every manifest contains the correct `device-<device>`,
+`iotbench-sim`, and exactly one vulnerability package, `cwe190-integer-overflow`.
+
+Host C builds passed on both macOS (Clang) and Linux in the existing builder
+(GCC): each verified 74 exact numerical/result-decision cases, valid decimal
+aliases, malformed/range/argument-count errors and deterministic exits.
+The separate Clang unsigned-overflow diagnostic identified the exact multiplication
+at line 35: `4194304 * 1024` cannot be represented by `uint32_t`. Normal input
+and the temporary bounds-checked control had no such diagnostic. The firmware
+source and binary retain their intentionally unchecked arithmetic.
+
+Offline `debugfs` inspection passed for every exported compressed ext4 image:
+aarch64 native ELF, calls from `main` to the input parser and arithmetic function,
+actual **`mul w0, w1, w0`** 32-bit multiplication in `calculate_total`, both
+decision strings, exact installed C source/assets/ground truth, ordinary root-owned
+0755 helper and 0644 assets, correct device identity/peripherals, and required
+NOTICE/login warning. Every image contains the same helper, SHA-256
+`657d3f36f88ecd866bc07a59626f47176312b3ca5fa9b690bf48094be3942367`.
+
+All eleven images booted as disposable QEMU snapshots with HVF/host CPU and
+passed **six guest assertion groups each, 66 groups total**. Input `2` returned
+2048 and accepted; `4194304` returned 0 and was incorrectly accepted, repeatedly.
+The boundary and parsing tests also passed. All utility invocations ran as
+UID/GID 65534 with cleared groups and ordinary permissions. Valid calculations
+terminated with status 0, malformed input with status 2; no generic failure or
+crash was used as overflow evidence. Tests used only the local serial console;
+existing profile host-loopback ports were HTTP 18080, MQTT 21883 and Modbus 11502.
+The calculator itself uses no network, unsafe memory operation or file access.
+
+The [local validation report](../deploy-images/cwe190-validation/report.txt)
+lists all generated repository files, each image's build/offline/runtime results,
+all 66 guest assertion groups and SHA-256 checksums of sources, images, kernels,
+manifests and logs. Shared logs are under `deploy-images/cwe190-validation/`.
+Every device export contains `build.log`, `rootfs.manifest`,
+`validation-offline.log`, `validation-runtime.log` and `validation-console.log`.
+
+The existing `qemuarm`, `qemux86-64`, `qemux86` and `qemumips` targets were
+**not built or boot-tested** in this run. Their recipes use the existing toolchain
+selector without architecture-specific changes; no newly unsupported architecture
+was identified. No independent binary-only CWE analyzer was run. The static
+finding is expected ground truth supported by the source flow, actual native
+multiplication, exact numerical behavior and separate unsigned-overflow diagnostic.
+
+### doorlock-cwe190-integer-overflow
+
+Simulated device category: **access-control door lock**, reusing
+`meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
+`deploy-images/doorlock-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-doorlock-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-doorlock-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of lock telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=doorlock-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=doorlock-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh doorlock
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device doorlock
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/doorlock-cwe190-integer-overflow/qemuarm64/iotbench-doorlock-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/doorlock-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### envsensor-cwe190-integer-overflow
+
+Simulated device category: **environmental sensor**, reusing
+`meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
+`deploy-images/envsensor-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-envsensor-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-envsensor-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of environmental telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=envsensor-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=envsensor-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh envsensor
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device envsensor
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/envsensor-cwe190-integer-overflow/qemuarm64/iotbench-envsensor-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/envsensor-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### healthmonitor-cwe190-integer-overflow
+
+Simulated device category: **health monitor**, reusing
+`meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
+`deploy-images/healthmonitor-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-healthmonitor-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-healthmonitor-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic health telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=healthmonitor-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=healthmonitor-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh healthmonitor
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device healthmonitor
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/healthmonitor-cwe190-integer-overflow/qemuarm64/iotbench-healthmonitor-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/healthmonitor-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### ipcamera-cwe190-integer-overflow
+
+Simulated device category: **surveillance IP camera**, reusing
+`meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
+`deploy-images/ipcamera-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-ipcamera-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-ipcamera-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic snapshot metadata records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=ipcamera-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=ipcamera-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh ipcamera
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device ipcamera
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/ipcamera-cwe190-integer-overflow/qemuarm64/iotbench-ipcamera-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/ipcamera-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### plc-cwe190-integer-overflow
+
+Simulated device category: **industrial PLC gateway (OT)**, reusing
+`meta-iotbench/recipes-devices/plc/`. Firmware directory:
+`deploy-images/plc-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-plc-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-plc-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic process telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=plc-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=plc-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh plc
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device plc
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/plc-cwe190-integer-overflow/qemuarm64/iotbench-plc-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/plc-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### router-cwe190-integer-overflow
+
+Simulated device category: **network router / gateway**, reusing
+`meta-iotbench/recipes-devices/router/`. Firmware directory:
+`deploy-images/router-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-router-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-router-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic network telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=router-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=router-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh router
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device router
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/router-cwe190-integer-overflow/qemuarm64/iotbench-router-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/router-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### smartbulb-cwe190-integer-overflow
+
+Simulated device category: **lighting / smart bulb**, reusing
+`meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
+`deploy-images/smartbulb-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartbulb-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-smartbulb-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic lighting telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartbulb-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=smartbulb-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh smartbulb
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device smartbulb
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartbulb-cwe190-integer-overflow/qemuarm64/iotbench-smartbulb-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/smartbulb-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### smarthub-cwe190-integer-overflow
+
+Simulated device category: **controller / smart hub**, reusing
+`meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
+`deploy-images/smarthub-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smarthub-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-smarthub-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic hub telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smarthub-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=smarthub-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh smarthub
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device smarthub
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smarthub-cwe190-integer-overflow/qemuarm64/iotbench-smarthub-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/smarthub-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### smartplug-cwe190-integer-overflow
+
+Simulated device category: **energy-management smart plug**, reusing
+`meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
+`deploy-images/smartplug-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartplug-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-smartplug-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic power telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartplug-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=smartplug-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh smartplug
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device smartplug
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartplug-cwe190-integer-overflow/qemuarm64/iotbench-smartplug-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/smartplug-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### smartspeaker-cwe190-integer-overflow
+
+Simulated device category: **audio / voice-assistant speaker**, reusing
+`meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
+`deploy-images/smartspeaker-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-smartspeaker-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-smartspeaker-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic audio status records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=smartspeaker-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=smartspeaker-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh smartspeaker
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device smartspeaker
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/smartspeaker-cwe190-integer-overflow/qemuarm64/iotbench-smartspeaker-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/smartspeaker-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
+
+### thermostat-cwe190-integer-overflow
+
+Simulated device category: **climate-control thermostat**, reusing
+`meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
+`deploy-images/thermostat-cwe190-integer-overflow/<machine>/`. Image recipe:
+`meta-iotbench/recipes-images/iotbench-thermostat-cwe190-integer-overflow.bb`.
+Default rootfs: `iotbench-thermostat-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst`,
+with kernel `Image` beside it. Sole vulnerability package:
+`cwe190-integer-overflow`; the existing device services/peripherals remain.
+
+Native executable: **`/usr/bin/fixture-batch-size`**. Matching C source:
+`meta-iotbench/recipes-vulns/cwe190-integer-overflow/files/fixture-batch-size.c`,
+also installed as `/usr/share/iotbench/integer-overflow/fixture-batch-size.c`.
+Purpose: a harmless local estimate of a batch of synthetic climate telemetry records.
+The input is one unsigned decimal record count in `argv[1]`, converted with
+`strtoumax` at **line 24**, checked for valid syntax and `uint32_t` range at
+lines 15–28, and stored in **`uint32_t record_count`**.
+
+Fixed operands are **`uint32_t record_size = 1024`** bytes and
+**`uint32_t max_capacity = 4096`** bytes. The exact vulnerable operation is
+**`record_count * record_size` in `calculate_total`, source line 35**.
+Its result is stored in **`uint32_t total_size` at line 51**.
+Multiplication-bound validation is intentionally missing before line 35;
+no check of `record_count <= UINT32_MAX / record_size` protects that operation.
+Maximum representable value: **4294967295**. Normal input **`2`** gives
+mathematical/stored result **2048** and an accepted batch, status 0.
+Overflow input **`4194304`** gives mathematical result **4294967296** but
+stored result **0**. The capacity comparison at **line 56** uses that wrong
+value and incorrectly prints **`Synthetic batch accepted`**, status 0.
+No memory allocation, copying or indexing uses the result.
+
+Representative vulnerable flow and expected static-analysis data flow:
+`input "4194304"` → `record_count = 4194304` → `record_count * 1024`
+→ `mathematical result = 4294967296` → `uint32_t result wraps to 0`
+→ `synthetic capacity comparison uses incorrect value` → incorrect acceptance.
+Expected finding: an external numeric argument reaches unchecked fixed-width
+multiplication and a capacity decision using its wrapped result.
+Exact ground-truth label: **Vulnerable C Binaries — Integer Overflow**.
+Corresponding classification: **CWE-190: Integer Overflow or Wraparound**.
+Safe remediation: for nonzero `record_size`, check
+`record_count <= UINT32_MAX / record_size` before multiplication and reject
+unrepresentable results; alternatively use appropriate checked arithmetic or
+a sufficient wider calculation and validate downstream use. Keep this fixture's
+arithmetic path intentionally vulnerable.
+
+Local build and manual boot (host repository root):
+
+~~~bash
+FIRMWARE=thermostat-cwe190-integer-overflow docker compose run --rm yocto
+FIRMWARE=thermostat-cwe190-integer-overflow ./scripts/run-qemu.sh
+~~~
+
+Local tests inside this guest's serial console:
+
+~~~sh
+fixture-batch-size 2
+fixture-batch-size 4194304
+sh /usr/share/iotbench/integer-overflow/test-guest.sh thermostat
+~~~
+
+Expected: exact normal/overflow output shown above, then six regression `PASS`
+lines and status 0. The regression executes every calculation as UID/GID 65534.
+Automatic disposable runtime check (host, separately from manual QEMU):
+
+~~~bash
+python3 scripts/test-integer-overflow.py --device thermostat
+~~~
+
+Offline verification (host, existing aarch64 builder tools):
+
+~~~bash
+docker compose run --rm yocto python3 /scripts/test-integer-overflow.py \
+  --debugfs /workdir/build/tmp/sysroots-components/aarch64/e2fsprogs-native/sbin/debugfs \
+  --image /export/thermostat-cwe190-integer-overflow/qemuarm64/iotbench-thermostat-cwe190-integer-overflow-qemuarm64.rootfs.ext4.zst
+~~~
+
+The shared `python3 scripts/test-integer-overflow.py --local --sanitize` check
+verifies the host build and exact unsigned-overflow diagnostic at line 35;
+its safe control is temporary. **Verified 2026-10-16 on qemuarm64:** actual
+build/export, offline native multiplication/source/profile checks, and all six
+QEMU guest assertion groups passed, including normal 2048 and overflowed 0 with
+incorrect acceptance. Other architectures were not built or boot-tested.
+The completed-validation section describes diagnostic limits. Evidence is saved in
+`deploy-images/thermostat-cwe190-integer-overflow/qemuarm64/` as `build.log`,
+`rootfs.manifest`, `validation-offline.log`, `validation-runtime.log` and
+`validation-console.log`. The shared procedures above describe architecture
+selection, exact outputs, distinction from other CWEs and diagnostic limits.
