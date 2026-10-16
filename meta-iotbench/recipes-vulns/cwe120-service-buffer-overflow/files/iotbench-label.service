@@ -1,0 +1,26 @@
+[Unit]
+Description=Intentionally insecure synthetic local label fixture (CWE-120)
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+RuntimeDirectory=iotbench-label
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/fixture-label-service
+Restart=no
+RuntimeMaxSec=15
+LimitCORE=0
+LimitCPU=5
+MemoryMax=64M
+TasksMax=4
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

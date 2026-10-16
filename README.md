@@ -904,6 +904,149 @@ The exact ground-truth label is **Vulnerable Bash files — Path Traversal**.
 See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal-cwe-22)
 for filesystem mappings, per-device data flows, remediation and local tests.
 
+### Vulnerable Java JARs — SQL Injection (CWE-89)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+All eleven profiles have a separate Java firmware fixture. Its executable JAR
+accepts one local record name, directly concatenates it into a SELECT without
+parameter binding or escaping, and executes it with JDBC `Statement.executeQuery()`.
+The fixed SQLite database opens in read-only mode and contains only synthetic
+public/internal records. Input `public` returns only the public row;
+`public' OR '1'='1` returns both. The vulnerable flow is compiled into the JAR.
+
+| Firmware id | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `envsensor-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `healthmonitor-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `ipcamera-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `plc-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `router-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `smartbulb-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `smarthub-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `smartplug-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `smartspeaker-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+| `thermostat-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
+
+#### Manual Java SQL injection test
+
+**1. Build on the host, if needed.** Run from the repository root. Skip this
+step if the selected firmware has already been exported. Rebuild the builder
+once to add the pinned `meta-openjdk` layer, then build the firmware:
+
+```bash
+docker compose build yocto
+FIRMWARE=router-cwe089-java-sql-injection docker compose run --rm yocto
+```
+
+**2. Boot on the host.** QEMU and `zstd` must be installed on the host:
+
+```bash
+FIRMWARE=router-cwe089-java-sql-injection ./scripts/run-qemu.sh
+```
+
+On an Apple Silicon Mac, use this accelerated command instead:
+
+```bash
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  FIRMWARE=router-cwe089-java-sql-injection ./scripts/run-qemu.sh
+```
+
+**3. Log into the guest serial console.** In the same terminal, wait for
+`qemuarm64 login:` and enter:
+
+```text
+login: root
+password: routeradmin
+```
+
+Run the remaining commands **inside the guest**, at `root@qemuarm64:~#`.
+The Java utility is tested through this console; it has no dashboard panel.
+
+**4. Run the normal lookup (guest):**
+
+```sh
+java -Xmx32m -jar /usr/share/iotbench/java-sql-injection/fixture-db-query.jar public
+echo "exit=$?"
+```
+
+Expected stdout:
+
+```text
+public|SYNTHETIC_PUBLIC_FIXTURE_DATA
+exit=0
+```
+
+Only the public record must appear. Each invocation also prints the fixture
+warning to stderr, so this line appears above the result in the console:
+
+```text
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+```
+
+**5. Run the SQL injection lookup (guest).** Keep the double quotes around
+the entire argument so its spaces and single quotes reach Java intact:
+
+```sh
+java -Xmx32m -jar /usr/share/iotbench/java-sql-injection/fixture-db-query.jar "public' OR '1'='1"
+echo "exit=$?"
+```
+
+Expected stdout, in this order:
+
+```text
+public|SYNTHETIC_PUBLIC_FIXTURE_DATA
+internal|SYNTHETIC_INTERNAL_FIXTURE_DATA
+exit=0
+```
+
+The extra internal record demonstrates the vulnerability: concatenation
+changes the SQL predicate to `record_name = 'public' OR '1'='1'`, matching
+both synthetic rows. The database remains read-only.
+
+**6. Verify execution without root privileges (optional, guest):**
+
+```sh
+setpriv --reuid=65534 --regid=65534 --clear-groups \
+  java -Xmx32m -jar /usr/share/iotbench/java-sql-injection/fixture-db-query.jar "public' OR '1'='1"
+echo "exit=$?"
+```
+
+Expected: the same two record lines and `exit=0`, plus the fixture warning.
+
+**7. Run the full guest regression (optional):**
+
+```sh
+sh /usr/share/iotbench/java-sql-injection/test-guest.sh router
+echo "exit=$?"
+```
+
+Expected: five `PASS` lines and `exit=0`. The regression runs Java as UID/GID
+65534 and checks normal/injected output, argument handling, unchanged database
+bytes and absence of journal sidecars. Warnings and lookup errors from deliberate
+negative cases are expected.
+
+**8. Close QEMU.** Press **Ctrl-A**, release the keys, then press **X**.
+The default disposable snapshot discards guest writes on exit.
+
+For another device, replace `router` in the firmware ID and regression argument
+with any device from the table above. The JAR path, payloads and expected
+records are identical. Use the same `YOCTO_MACHINE` when building and booting
+another architecture; the default is `qemuarm64`.
+
+For automatic disposable boots, run
+`python3 scripts/test-java-sql-injection.py --all` on the host separately from
+manual QEMU.
+
+Each image installs only `cwe089-java-sql-injection` as its vulnerability
+package, plus the cross-built OpenJDK runtime and pinned SQLite JDBC dependency.
+The initial Java build requires extra downloads and compilation. Existing
+`YOCTO_MACHINE`, export paths and catalog-wide build discovery apply.
+See [docs/java-sql-injection.md](docs/java-sql-injection.md) for the exact Java
+source/sink, dependency pins, filesystem layout, schema, batch builds, offline
+and local tests, validation status and remediation.
+
 ### Vulnerable C Binaries — SQL injection (CWE-89)
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT

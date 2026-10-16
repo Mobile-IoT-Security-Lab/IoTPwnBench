@@ -1,0 +1,23 @@
+{
+  "label": "Vulnerable C Binaries — Buffer Overflow exposed via service interface",
+  "cwe": "CWE-120",
+  "secondary_cwe": "CWE-121",
+  "endpoint": "/run/iotbench-label/service.sock",
+  "protocol": "two-byte unsigned big-endian length, 1..1024 printable ASCII bytes, then SHUT_WR",
+  "field": "synthetic display label",
+  "handler": "handle_label_request",
+  "buffer": "char label[32]",
+  "capacity": 32,
+  "normal": "SYNTHETIC_DEVICE_NAME",
+  "oversized": "SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+  "source": "Service request data",
+  "propagation": "serve_request -> handle_label_request(field)",
+  "operation": "strcpy(label, field)",
+  "missing_protection": "strlen(field) < sizeof(label) before strcpy, including NUL capacity",
+  "sink": "out-of-bounds stack write",
+  "expected_finding": "Buffer Overflow reachable through a firmware service interface",
+  "copy_line": 35,
+  "buffer_line": 33,
+  "handler_call_line": 65,
+  "receive_line": 53
+}

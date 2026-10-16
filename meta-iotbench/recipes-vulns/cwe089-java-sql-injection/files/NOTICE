@@ -1,0 +1,4 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+Vulnerable C Binaries — SQL injection (CWE-89).
+Local native C lookup deliberately interpolates argv[1] into a SELECT query.
+Only synthetic records in a fixed read-only SQLite database are queried.

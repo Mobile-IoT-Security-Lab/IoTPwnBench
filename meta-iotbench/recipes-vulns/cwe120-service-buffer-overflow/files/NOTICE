@@ -1,0 +1,3 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+Ground truth: Vulnerable C Binaries — Buffer Overflow exposed via service interface
+Primary CWE-120; stack destination CWE-121. Authorized isolated offline research only.

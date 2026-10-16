@@ -58,6 +58,11 @@ RUN git clone --depth 1 -b "${YOCTO_RELEASE}" https://git.openembedded.org/bitba
     git clone --single-branch -b wrynose https://git.openembedded.org/meta-openembedded && \
     git -C meta-openembedded checkout "${META_OPENEMBEDDED_REV}"
 
+# Java firmware fixtures use the cross-built runtime and native bootstrap JDK.
+ARG META_OPENJDK_REV=0fefb16cf99e687a53ae5e36a163af962dd64e9f
+RUN git clone --single-branch -b wrynose https://github.com/amarula/meta-openjdk.git && \
+    git -C meta-openjdk checkout "${META_OPENJDK_REV}"
+
 COPY --chown=yocto:yocto builder/ /opt/yocto/
 
 WORKDIR /workdir

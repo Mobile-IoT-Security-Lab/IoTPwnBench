@@ -215,6 +215,29 @@ values. Implemented templates to copy:
 `mosquitto` needs the `meta-networking` layer (with `meta-python`), already in
 `YOCTO_LAYERS`; `libmodbus` is in `meta-oe`.
 
+## Java fixtures
+
+Java utilities follow the same local-source vulnerability-package pattern;
+keep Java sources in the package's `files/` directory. The pinned
+`meta-openjdk` layer is included by the builder and Compose. IoTBench selects
+OpenJDK 17, with `openjdk-bin-native` supplying build-time `javac` and `openjdk`
+supplying the cross-built target runtime. Rebuild the builder after pulling
+changes to its layer pins: `docker compose build yocto`.
+
+Use `${STAGING_LIBDIR_NATIVE}/jvm/bin/javac --release 17` in `do_compile()` and
+package an executable JAR with explicit Main-Class and Class-Path. Install
+fixture JARs and matching source/assets under `${datadir}/iotbench/<scenario>/`;
+shared dependency JARs belong in `${datadir}/java/`. Fixed ZIP timestamps and
+entry ordering avoid timestamp-dependent artifacts. No Maven/Gradle application
+project or target compiler is needed for a small utility.
+
+For SQLite JDBC, reuse the pinned `iotbench-sqlite-jdbc` platform package: its
+Java classes use a Yocto-built JNI library linked to target SQLite. Do not copy
+host native libraries into firmware. Render `datadir`/`libdir` into packaged
+configuration rather than accepting user-selected database paths. See
+[Java SQL injection](java-sql-injection.md) for the complete reference recipe,
+offline image checks, host JVM regression and disposable guest tests.
+
 ## Dashboard module API reference
 
 Provided by `router.php` (router device):
