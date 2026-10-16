@@ -24,12 +24,25 @@ public final class FixtureDbQuery {
             return;
         }
         String input = args[0];
+        try {
+            System.out.print(lookup(input));
+        } catch (SQLException | IOException | ClassNotFoundException e) {
+            System.err.println("Synthetic fixture lookup failed");
+            System.exit(1);
+        }
+    }
 
+    /** Shared application operation used by the CLI and local web backend. */
+    public static String lookup(String input) throws SQLException, IOException, ClassNotFoundException {
+        if (input.isEmpty() || input.length() > 240) {
+            throw new IllegalArgumentException("Expected a record name of 1..240 characters");
+        }
         // INTENTIONAL CWE-89: input becomes SQL syntax, with no parameter binding
         // or SQL escaping. Keep this direct source-to-sink path for analysis.
         String query = "SELECT record_name, record_value FROM fixture_records "
-                + "WHERE record_name = '" + input + "' ORDER BY id;";
+                + "WHERE visibility = 'public' AND record_name = '" + input + "' ORDER BY id;";
 
+        StringBuilder output = new StringBuilder();
         Properties fixture = new Properties();
         try (InputStream config = FixtureDbQuery.class.getResourceAsStream("/fixture.properties")) {
             if (config == null) {
@@ -51,13 +64,12 @@ public final class FixtureDbQuery {
                 stmt.setQueryTimeout(2);
                 try (ResultSet rs = stmt.executeQuery(query)) {
                     while (rs.next()) {
-                        System.out.println(rs.getString("record_name") + "|" + rs.getString("record_value"));
+                        output.append(rs.getString("record_name")).append('|')
+                                .append(rs.getString("record_value")).append('\n');
                     }
                 }
             }
-        } catch (SQLException | IOException | ClassNotFoundException e) {
-            System.err.println("Synthetic fixture lookup failed");
-            System.exit(1);
         }
+        return output.toString();
     }
 }

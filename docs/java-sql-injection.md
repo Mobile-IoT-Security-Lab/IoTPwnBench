@@ -7,9 +7,19 @@ image. Its sole vulnerability package is `cwe089-java-sql-injection`. The common
 image, device profile, native services, simulated peripherals, build selector,
 export layout and QEMU launcher retain their existing roles.
 
-The canonical entry point is a local Java command in the guest serial console.
-All database records are fake. The `internal` row is simply the extra record
-outside the ordinary named lookup, not a separate authentication scenario.
+The **Configuration Lookup** dashboard panel models a public configuration
+search backed by a Java firmware service. The same operation remains available
+as a local Java command. Normal searches enforce `visibility = 'public'`, so
+even a direct search for `internal` returns no rows. SQL injection bypasses
+that visibility predicate and exposes the synthetic internal row. This is an
+application filtering boundary, not an OS permission or account-authentication
+scenario. All records are fake; no vendor firmware or CVE is claimed.
+
+The deployment model is a Linux management stack, matching IoTBench's QEMU
+firmware architecture. For small-device profiles this represents the simulated
+Linux management/controller variant; it does not reproduce an MCU-only bulb,
+sensor or lock running a vendor's native software. The realistic element is
+the HTTP-to-Java/JDBC input flow and the actual SQL visibility-filter bypass.
 
 | Device | Firmware id |
 | --- | --- |
@@ -31,18 +41,20 @@ The implementation is
 [`FixtureDbQuery.java`](../meta-iotbench/recipes-vulns/cwe089-java-sql-injection/files/FixtureDbQuery.java),
 compiled with debug information and packaged as a Java 17 executable JAR.
 
-1. `main()` validates the argument count before reading `args[0]`, and accepts
-   one string of 1–240 Java characters.
-2. `String input = args[0]` receives user-controlled input.
+1. CLI `main()` validates the argument count before reading `args[0]`.
+   The web backend accepts a UTF-8 POST body at its fixed `/lookup` endpoint.
+   Both paths enforce one string of 1–240 Java characters.
+2. CLI `String input = args[0]` or the HTTP body reaches the shared
+   `FixtureDbQuery.lookup(input)` operation.
 3. Direct string concatenation constructs
-   `SELECT record_name, record_value FROM fixture_records WHERE record_name = '`
+   `SELECT record_name, record_value FROM fixture_records WHERE visibility = 'public' AND record_name = '`
    plus `input` plus `' ORDER BY id;`.
 4. `DriverManager.getConnection()` opens the fixed packaged SQLite database
    through JDBC, with URI `mode=ro&immutable=1` and `open_mode=1`
    (`SQLITE_OPEN_READONLY`). It verifies `connection.isReadOnly()` before
    executing the query. Extension loading is disabled.
 5. `Statement.executeQuery(query)` executes that constructed SQL. There is no
-   parameter binding, quote escaping or predicate filtering.
+   parameter binding, quote escaping or filtering of SQL syntax in the input.
 6. `ResultSet.getString()` returns the matched synthetic names and values.
 
 The complete expected finding is **Java JAR + user-controlled input + SQL
@@ -52,16 +64,21 @@ the installed `org/iotbench/fixture/FixtureDbQuery.class` bytecode. Java may
 compile string concatenation to `invokedynamic` / `StringConcatFactory`.
 The installed matching source and `ground-truth.json` aid source/bytecode tools.
 
-Normal `public` makes the predicate `record_name = 'public'`, selecting only row
-1. Input `public' OR '1'='1` makes it
-`record_name = 'public' OR '1'='1'`, selecting both rows. The intentionally
-vulnerable query remains unchanged in the firmware. Shell and Python files
+Normal `public` selects only row 1, and `internal` selects no rows because of
+the public-visibility filter. Input `public' OR '1'='1` makes the predicate
+`visibility = 'public' AND record_name = 'public' OR '1'='1'`, selecting both
+rows. SQL's AND/OR precedence makes the injected OR bypass both conditions.
+The shipped query deliberately retains string concatenation. Shell and Python files
 are test infrastructure; the ordinary JNI driver is the database dependency.
 
-The utility has no network interface, shell invocation, elevated permissions,
-runtime database creation or input-controlled database path. Query results
+The CLI has no network interface. The Java web backend uses the JDK's
+[`jdk.httpserver`](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.httpserver/module-summary.html)
+module inside the same application JAR. The dashboard forwards raw input over
+a fixed guest-loopback URL; it never constructs SQL or runs a shell/process.
+Both interfaces avoid elevated permissions, runtime database creation and
+input-controlled database paths. Query results
 are capped at sixteen rows and the JDBC query timeout is two seconds.
-Successful queries, including no matches, exit 0; SQL/configuration failures
+In the CLI, successful queries, including no matches, exit 0; SQL/configuration failures
 exit 1; invalid argument counts or lengths exit 2. The warning goes to stderr
 on every invocation; record results go to stdout.
 
@@ -76,6 +93,10 @@ on every invocation; record results go to stdout.
 | `/usr/share/java/iotbench-sqlite-jdbc.jar` | Pinned JDBC classes; manifest Class-Path resolves here |
 | `/usr/lib/libsqlitejdbc.so` | Yocto cross-built Xerial JNI library linked to target SQLite |
 | `/usr/lib/jvm/` and `/usr/bin/java` | OpenJDK runtime and its launcher link |
+| Same application JAR: `org.iotbench.fixture.FixtureWebService` | Loopback HTTP entry point sharing `FixtureDbQuery.lookup()` |
+| `/usr/share/iotbench/java-sql-injection/FixtureWebService.java` | Matching backend source |
+| `/usr/share/router-dashboard/modules/java-configuration-lookup/module.php` | Thin dashboard adapter, no SQL or process execution |
+| `/usr/lib/systemd/system/iotbench-java-sql.service` | Automatically enabled backend service, UID/GID 990 (`javafixture`) |
 
 Paths above use the repository's default `datadir` and `libdir`. Recipes render
 these variables into the packaged configuration and test assets. The database
@@ -94,6 +115,16 @@ visibility CHECK constraint. Exact rows:
 No credentials or production information are used. Read-only JDBC flags apply
 even when the caller is root; database file permissions additionally permit
 ordinary unprivileged reads. No journal or persistent state is needed.
+
+The Java service listens only on guest `127.0.0.1:18089`, with bounded request
+bodies, connections, workers and request/response timeouts. Its systemd unit
+uses a locked account, `NoNewPrivileges`, an empty capability set, a read-only
+system view, protected homes and private temporary/device namespaces. The JVM
+runs in this separate service because it requires executable memory; Lighttpd's
+existing `MemoryDenyWriteExecute` and other hardening are retained. There is
+no new host port forward. The backend is an internal application endpoint;
+the public HTTP entry is the existing management dashboard with its existing
+request-token checks. No extra authentication vulnerability is introduced.
 
 ## Java dependencies and reproducibility
 
@@ -127,6 +158,14 @@ is recreated from scratch for each build. No compiler/build tool is required
 in the guest; all dependencies are available offline after building.
 
 ## Build and manual verification
+
+Rebuild an existing export to add the web panel and backend service. After
+booting, open `http://127.0.0.1:8080` (or the port set by `QEMU_HTTP_PORT`) in
+the host browser. In **Configuration Lookup**, submit `public`, then `internal`,
+then `public' OR '1'='1` using **Search configuration**. Expected results are
+respectively the public row, no records, and both public/internal rows. Do not
+add surrounding shell double quotes in the form field. See the root README's
+**Manual browser test** for the Apple Silicon boot command and output table.
 
 From the host repository root, rebuild the builder once to add the pinned layer:
 
@@ -191,7 +230,12 @@ QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
 
 The host runner boots disposable snapshots through the existing launcher,
 checks all five guest groups, closes QEMU and saves `validation-console.log`
-beside each export. It requires host QEMU and `zstd`.
+beside each export. It also exercises the actual dashboard HTTP action and
+loopback Java backend: normal lookup, direct `internal` denial, injected
+visibility bypass, malformed inputs, CSRF rejection, private-asset denial,
+service UID, loopback binding, unchanged database and Lighttpd sandbox.
+The runner decompresses its disk into a temporary directory to avoid touching
+disks used by manual guests. It requires host QEMU and `zstd`.
 
 Offline firmware inspection uses `debugfs` without mounting or running firmware:
 
@@ -222,49 +266,21 @@ JAR. The database stays unchanged. This host test supplements guest validation.
 ## Remediation
 
 In a separate corrected variant, use a constant query ending in
-`WHERE record_name = ? ORDER BY id`, call `connection.prepareStatement(query)`,
+`WHERE visibility = 'public' AND record_name = ? ORDER BY id`, call `connection.prepareStatement(query)`,
 bind `stmt.setString(1, input)`, then call `stmt.executeQuery()` with no SQL
 argument. The crafted string becomes a value and returns no rows; ordinary
 `public` still returns only the public row. Preserve read-only mode and ordinary
 permissions. The actual fixture intentionally retains the vulnerable query.
 
-## Completed validation
+## Validation artifacts
 
-On 2026-10-16, all eleven `qemuarm64` images built and exported successfully
-after a clean layer parse and dependency dry run. Each exported manifest
-contains exactly one vulnerability package, `cwe089-java-sql-injection`, plus
-OpenJDK 17, the pinned JDBC package and target SQLite library.
+The offline checker verifies both Java classes, exact installed Java/PHP sources,
+service definition, fixed database configuration, dependency JAR/JNI/runtime,
+synthetic database contents, file modes and warning. Runtime testing uses
+isolated temporary disks and existing dashboard HTTP forwarding; it records
+`validation-console.log` and the actual API requests/responses in
+`validation-web.json` beside each device export.
 
-Offline checks passed for all eleven compressed ext4 images: actual Java 17
-bytecode and JDBC/query references, executable manifest, fixed read-only
-configuration, target runtime/JNI, exact matching source/assets, file modes,
-synthetic database integrity/records and login warning. Every image contains
-the same JAR (SHA-256
-`5050383bf66dea9760abe3bf7b706edf3121e7237e3592e4f5e5265294e63817`)
-and database (SHA-256
-`4b3f4330fe7cae2725831a28873be7377cb44b5a9fa3c6b96603667a444af66a`).
-Disassembly of the extracted application confirms argument-array access,
-string concatenation, JDBC connection/read-only verification and
-`Statement.executeQuery(String)` in the actual firmware bytecode.
-
-All eleven devices booted in disposable QEMU snapshots with HVF/host CPU and
-passed all five guest groups each, **55 groups total**. Every application
-invocation ran as UID/GID 65534. Ordinary `public` returned only the public
-record; the injected condition returned both synthetic records. Invalid
-argument counts, empty/oversized input, malformed SQL and literal shell-shaped
-input behaved as specified. Database bytes stayed unchanged, with no journal
-sidecars. Existing device-service host-loopback ports were HTTP `18080`, MQTT
-`21883` and Modbus `11502`; the Java fixture itself uses no network.
-
-The host JVM regression also passed, including a temporary corrected
-`PreparedStatement` control that preserved ordinary lookup and returned no
-rows for the injected string. The actual firmware remains vulnerable.
-
-The [local validation report](../deploy-images/java-sql-injection-qemuarm64-validation.txt)
-records artifact/source hashes and the per-device guest groups. Aggregate
-logs and extracted bytecode disassembly are under
-`deploy-images/java-sql-injection-*`; each device export contains
-`rootfs.manifest` and `validation-console.log`. Other architectures were not
-built or boot-tested. No external static-analysis engine was run; CWE-89 is
-the expected ground truth supported by the source, bytecode and reproduced
-Java/JDBC behavior.
+The web revision is validated independently of the earlier CLI-only revision.
+Current aggregate evidence is stored under `deploy-images/java-sql-injection-web-*`.
+Only architectures actually built and booted are claimed as validated.

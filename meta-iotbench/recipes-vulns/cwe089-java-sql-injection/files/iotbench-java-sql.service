@@ -1,0 +1,22 @@
+[Unit]
+Description=IoTBench synthetic configuration lookup Java backend
+After=network.target
+
+[Service]
+Type=simple
+User=javafixture
+Group=javafixture
+ExecStart=@BINDIR@/java -Xms8m -Xmx32m -XX:+UseSerialGC -XX:-UsePerfData -Djava.net.preferIPv4Stack=true -cp @DATADIR@/iotbench/java-sql-injection/fixture-db-query.jar org.iotbench.fixture.FixtureWebService
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

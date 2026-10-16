@@ -20,8 +20,9 @@ fixtures model validated numeric input reaching unchecked uint32_t multiplicatio
 and a synthetic capacity decision that uses the wrapped result.
 
 The [Vulnerable Java JARs — SQL Injection](java-sql-injection.md) fixtures
-model Java bytecode concatenating a local record name into a read-only SQLite
-JDBC SELECT, with one firmware for every existing device. That guide records
+model Java bytecode concatenating a CLI/dashboard record name into a read-only SQLite
+JDBC SELECT, bypassing its public-record visibility filter, with one firmware
+for every existing device. That guide records
 the dependencies, exact flow, payloads, build/test commands and validation.
 
 ## Weak Cipher: 3DES Device Backups

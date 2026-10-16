@@ -1,15 +1,15 @@
 {
   "label": "Vulnerable Java JARs — SQL Injection",
   "cwe": "CWE-89",
-  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT\nVulnerable C Binaries — SQL injection (CWE-89).\nLocal native C lookup deliberately interpolates argv[1] into a SELECT query.\nOnly synthetic records in a fixed read-only SQLite database are queried.",
+  "warning": "INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT\nVulnerable Java JARs — SQL Injection (CWE-89).\nThe configuration lookup deliberately concatenates CLI/web input into a JDBC SELECT.\nSQL injection bypasses its public-record visibility filter in a fixed read-only synthetic database.",
   "jar": "@DATADIR@/iotbench/java-sql-injection/fixture-db-query.jar",
   "main_class": "org.iotbench.fixture.FixtureDbQuery",
   "source": "FixtureDbQuery.java",
   "database": "@DATADIR@/iotbench/java-sql-injection/fixture.db",
   "dependency": "@DATADIR@/java/iotbench-sqlite-jdbc.jar",
   "native_driver": "@LIBDIR@/libsqlitejdbc.so",
-  "source_expression": "args[0] -> input",
-  "construction": "SQL SELECT string + input + SQL suffix",
+  "source_expression": "CLI args[0] or HTTP POST /lookup body -> input -> FixtureDbQuery.lookup(input)",
+  "construction": "SQL SELECT ... WHERE visibility = 'public' AND record_name = ' + input + ' ORDER BY id;",
   "missing_protection": "No parameter binding or SQL escaping",
   "read_only": "URI mode=ro&immutable=1; JDBC open_mode=1; connection.isReadOnly() enforced before query execution",
   "sink": "stmt.executeQuery(query)",
@@ -22,6 +22,9 @@
     "public|SYNTHETIC_PUBLIC_FIXTURE_DATA",
     "internal|SYNTHETIC_INTERNAL_FIXTURE_DATA"
   ],
-  "scope": "Fixed synthetic database, read-only JDBC connection, disabled extension loading; ordinary permissions; local CLI",
-  "remediation": "Use a fixed SELECT with WHERE record_name = ? and PreparedStatement.setString(1, input) in a separate corrected variant"
+  "scope": "Read-only fixed synthetic database; unprivileged Java service bound to guest loopback; shared dashboard retains CSRF and Lighttpd sandbox; no shell execution",
+  "remediation": "Keep WHERE visibility = 'public' AND record_name = ? in a fixed SELECT, bind PreparedStatement.setString(1, input), then executeQuery() in a separate corrected variant",
+  "web_entry": "Dashboard Configuration Lookup -> java_configuration_lookup API -> fixed loopback POST http://127.0.0.1:18089/lookup -> Java JDBC lookup",
+  "normal_internal_output": [],
+  "consequence": "SQL injection bypasses the public visibility predicate and exposes the synthetic internal record"
 }

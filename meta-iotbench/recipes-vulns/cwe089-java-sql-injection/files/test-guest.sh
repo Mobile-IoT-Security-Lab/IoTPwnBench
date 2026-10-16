@@ -32,6 +32,7 @@ internal|SYNTHETIC_INTERNAL_FIXTURE_DATA"
 check 0 "$public" public
 check 0 "$public" public
 check 0 '' unknown
+check 0 '' internal
 printf '%s\n' 'PASS ordinary lookup returns only the public synthetic record'
 
 check 0 "$both" "public' OR '1'='1"

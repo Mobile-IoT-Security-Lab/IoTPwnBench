@@ -912,8 +912,11 @@ All eleven profiles have a separate Java firmware fixture. Its executable JAR
 accepts one local record name, directly concatenates it into a SELECT without
 parameter binding or escaping, and executes it with JDBC `Statement.executeQuery()`.
 The fixed SQLite database opens in read-only mode and contains only synthetic
-public/internal records. Input `public` returns only the public row;
-`public' OR '1'='1` returns both. The vulnerable flow is compiled into the JAR.
+public/internal records. A public-visibility filter makes input `internal`
+return no rows; `public` returns only the public row. Input
+`public' OR '1'='1` bypasses the filter and returns both rows. The same Java
+lookup serves the CLI and the dashboard's **Configuration Lookup** panel.
+The vulnerable flow is compiled into the JAR.
 
 | Firmware id | CWE | Scenario |
 | --- | --- | --- |
@@ -929,7 +932,45 @@ public/internal records. Input `public` returns only the public row;
 | `smartspeaker-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
 | `thermostat-cwe089-java-sql-injection` | CWE-89 | Java JAR synthetic SQLite JDBC lookup SQL injection |
 
-#### Manual Java SQL injection test
+#### Manual browser test
+
+This models a public configuration-search function backed by a Java firmware
+service. Internal records should not be returned by the search. A separate
+unprivileged Java process in the same JAR handles requests on guest loopback;
+the existing dashboard forwards the input to it. PHP performs no SQL or shell
+execution, and Lighttpd retains its sandbox.
+
+Build the updated firmware and boot it from the host repository root:
+
+```bash
+FIRMWARE=router-cwe089-java-sql-injection docker compose run --rm yocto
+QEMU_ACCEL=hvf QEMU_CPU=host QEMU_HTTP_PORT=18080 \
+  FIRMWARE=router-cwe089-java-sql-injection ./scripts/run-qemu.sh
+```
+
+The boot command above uses Apple Silicon acceleration. On other hosts, omit
+`QEMU_ACCEL=hvf QEMU_CPU=host`. Existing older exports must be rebuilt to include
+the web panel and service. On a fresh builder, first run `docker compose build yocto`.
+
+Open **http://127.0.0.1:18080** in the host browser and find **Configuration Lookup**.
+Enter each value in **Record name**, then click **Search configuration**:
+
+| Input | Expected result |
+| --- | --- |
+| `public` | `public\|SYNTHETIC_PUBLIC_FIXTURE_DATA` |
+| `internal` | No public configuration found; no records |
+| `public' OR '1'='1` | Both `public\|SYNTHETIC_PUBLIC_FIXTURE_DATA` and `internal\|SYNTHETIC_INTERNAL_FIXTURE_DATA` |
+
+Enter the injection exactly as shown, without surrounding double quotes: those
+quotes are needed only for shell commands. The internal row appearing only
+after SQL injection demonstrates a bypass of the Java query's visibility
+filter. These remain synthetic records in a read-only database.
+
+The browser uses the existing dashboard request-token checks. Results are
+rendered as text by the existing UI. The Java backend binds only to guest
+`127.0.0.1:18089`, runs as `javafixture`, and has no separate host port forward.
+
+#### Manual Java CLI test
 
 **1. Build on the host, if needed.** Run from the repository root. Skip this
 step if the selected firmware has already been exported. Rebuild the builder
@@ -962,7 +1003,7 @@ password: routeradmin
 ```
 
 Run the remaining commands **inside the guest**, at `root@qemuarm64:~#`.
-The Java utility is tested through this console; it has no dashboard panel.
+These CLI checks exercise the same Java lookup operation used by the web panel.
 
 **4. Run the normal lookup (guest):**
 
@@ -985,6 +1026,15 @@ warning to stderr, so this line appears above the result in the console:
 INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 ```
 
+Also verify that a direct internal-record lookup returns no rows:
+
+```sh
+java -Xmx32m -jar /usr/share/iotbench/java-sql-injection/fixture-db-query.jar internal
+echo "exit=$?"
+```
+
+Expected: only the warning on stderr, no record output, and `exit=0`.
+
 **5. Run the SQL injection lookup (guest).** Keep the double quotes around
 the entire argument so its spaces and single quotes reach Java intact:
 
@@ -1002,8 +1052,9 @@ exit=0
 ```
 
 The extra internal record demonstrates the vulnerability: concatenation
-changes the SQL predicate to `record_name = 'public' OR '1'='1'`, matching
-both synthetic rows. The database remains read-only.
+changes the SQL predicate to
+`visibility = 'public' AND record_name = 'public' OR '1'='1'`, matching both
+synthetic rows and bypassing the public-record filter. The database remains read-only.
 
 **6. Verify execution without root privileges (optional, guest):**
 
@@ -1037,7 +1088,9 @@ another architecture; the default is `qemuarm64`.
 
 For automatic disposable boots, run
 `python3 scripts/test-java-sql-injection.py --all` on the host separately from
-manual QEMU.
+manual QEMU. It checks both CLI and dashboard HTTP behavior, including direct
+internal-record denial, SQL injection, CSRF, the Java service identity and
+Lighttpd's retained sandbox.
 
 Each image installs only `cwe089-java-sql-injection` as its vulnerability
 package, plus the cross-built OpenJDK runtime and pinned SQLite JDBC dependency.
