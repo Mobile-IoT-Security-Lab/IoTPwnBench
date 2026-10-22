@@ -6,6 +6,9 @@ x-builder: &builder
     YOCTO_LAYERS: openembedded-core/meta meta-openembedded/meta-oe meta-openembedded/meta-python meta-openembedded/meta-networking meta-openjdk meta-iotbench
     # Which firmware to build: matches recipes-images/iotbench-${FIRMWARE}.bb
     FIRMWARE: ${FIRMWARE:-router-cwe078-os-command-injection}
+    # Explicit opt-in; the CWE-120 package is unavailable in ordinary builds.
+    IOTBENCH_ENABLE_CWE120_FIXTURE: ${IOTBENCH_ENABLE_CWE120_FIXTURE:-0}
+    BB_ENV_PASSTHROUGH_ADDITIONS: "${BB_ENV_PASSTHROUGH_ADDITIONS:-} IOTBENCH_ENABLE_CWE120_FIXTURE"
   volumes:
     # Downloads, sstate and hash equivalence database: keep between builds.
     - yocto-cache:/cache

@@ -1,5 +1,6 @@
 [Unit]
 Description=Intentionally insecure synthetic local label fixture (CWE-120)
+ConditionPathExists=/etc/iotbench/cwe120-fixture-enabled
 
 [Service]
 Type=simple
@@ -7,7 +8,8 @@ User=nobody
 Group=nogroup
 RuntimeDirectory=iotbench-label
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/fixture-label-service
+Environment=IOTBENCH_CWE120_FIXTURE=1
+ExecStart=/usr/bin/fixture-label-service --fixture-test
 Restart=no
 RuntimeMaxSec=15
 LimitCORE=0

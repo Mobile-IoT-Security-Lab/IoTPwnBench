@@ -124,6 +124,7 @@ you close the manual instance; `--get` clients contact an already running guest.
 | [C SQL injection](#vulnerable-c-binaries--sql-injection-cwe-89) | `cwe089-c-sql-injection` | Guest | Injection expands the search to both records |
 | [NULL dereference](#vulnerable-c-binaries--null-pointer-dereference-cwe-476) | `cwe476-null-pointer-dereference` | Guest | Supervisor confirms SIGSEGV at address zero |
 | [Integer overflow](#vulnerable-c-binaries--integer-overflow-cwe-190) | `cwe190-integer-overflow` | Guest | Product wraps to zero and the batch is accepted |
+| [Local service buffer copy](#vulnerable-c-binaries--local-service-buffer-copy-cwe-120) | `cwe120-service-buffer-overflow` | Isolated host test / guest | ASan identifies a stack write past a 32-byte label |
 
 ### Technical references
 
@@ -151,6 +152,201 @@ model Java bytecode concatenating a CLI/dashboard record name into a read-only S
 JDBC SELECT, bypassing its public-record visibility filter, with one firmware
 for every existing device. That guide records
 the dependencies, exact flow, payloads, build/test commands and validation.
+
+## Vulnerable C Binaries — Local Service Buffer Copy (CWE-120)
+
+> INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+
+### Scope and integration
+
+**CWE-120: Buffer Copy without Checking Size of Input** is modeled by one
+unchecked copy of a synthetic display label into a 32-byte stack buffer.
+CWE-121 describes the stack destination of this same flaw; it is not a second
+intentional vulnerability. The fixture performs a harmless in-memory operation
+and returns `SYNTHETIC_LABEL_UPDATED` followed by a newline for valid short
+requests. It does not execute commands or modify device state.
+
+Every supported category uses the existing device profile and a separate image:
+
+| Category / device keyword | Firmware fixture |
+| --- | --- |
+| Network gateway / `router` | `router-cwe120-service-buffer-overflow` |
+| Surveillance camera / `ipcamera` | `ipcamera-cwe120-service-buffer-overflow` |
+| Energy management / `smartplug` | `smartplug-cwe120-service-buffer-overflow` |
+| Climate control / `thermostat` | `thermostat-cwe120-service-buffer-overflow` |
+| Industrial gateway / `plc` | `plc-cwe120-service-buffer-overflow` |
+| Lighting / `smartbulb` | `smartbulb-cwe120-service-buffer-overflow` |
+| Controller / `smarthub` | `smarthub-cwe120-service-buffer-overflow` |
+| Environmental sensor / `envsensor` | `envsensor-cwe120-service-buffer-overflow` |
+| Audio assistant / `smartspeaker` | `smartspeaker-cwe120-service-buffer-overflow` |
+| Health monitor / `healthmonitor` | `healthmonitor-cwe120-service-buffer-overflow` |
+| Access control / `doorlock` | `doorlock-cwe120-service-buffer-overflow` |
+
+Recipes retain the established name
+`meta-iotbench/recipes-images/iotbench-<firmware fixture>.bb`, require
+`iotbench-service-buffer-overflow.inc`, and select only
+`cwe120-service-buffer-overflow` as `IOTBENCH_VULN_INSTALL`. The catalog build
+script already discovers these eleven recipes. Sources, service unit, tests,
+NOTICE and ground truth are in
+`meta-iotbench/recipes-vulns/cwe120-service-buffer-overflow/files/`.
+The recipe installs `/usr/bin/fixture-label-service`, the separate diagnostic
+executable `fixture-label-service-asan`, and source/test assets under
+`/usr/share/iotbench/service-buffer-overflow/`.
+
+### Interface, data flow and expected static findings
+
+The one-request native C service accepts **AF_UNIX / SOCK_STREAM** at
+`/run/iotbench-label/service.sock`; there is no TCP/UDP listener. Each connection
+first receives a readiness byte `0x01` from the server, synchronizing acceptance
+before the client's half-close. The client then sends a two-byte unsigned
+big-endian byte count, exactly that many printable
+ASCII bytes (1 through 1024), then the client half-closes its write side.
+Truncated headers/bodies, trailing bytes, zero or excessive protocol length,
+embedded NUL, control characters and non-ASCII bytes are rejected with exit 2
+and no response. Socket receives handle partial reads and EINTR.
+
+The input path in `fixture-label-service.c` is:
+
+```text
+recv -> receive_exact -> field[1025] (line 61)
+     -> validated protocol length and printable ASCII; append NUL
+     -> handle_label_request(field, length) (line 73)
+     -> volatile char label[32] (line 38)
+     -> for i = 0..length inclusive: label[i] = field[i] (line 43)
+```
+
+The sole missing check is `length < sizeof(label)` before the copy, including
+space for its terminating NUL. A 31-byte field fits; a 32-byte field writes its
+NUL one byte past the destination. Longer protocol-valid fields reach the same
+flaw. The 1024-byte framing limit protects the receive buffer but does not
+protect the smaller destination. Volatile keeps these byte writes observable
+in optimized binaries. No compiler hardening flags are removed to expose them.
+
+Expected static finding: externally supplied socket data and its length reach
+an unchecked destination index in `handle_label_request`, with a possible
+out-of-bounds stack write (CWE-120, additionally classifiable as CWE-121).
+Tools should trace the receive/parser/handler path and distinguish the protocol
+size check from a destination-capacity check. `ground-truth.json` records exact
+source locations; the host runner checks them against the source. Actual
+analyzer coverage and diagnostic wording depend on the tool; no particular
+static analyzer's detection is asserted by the regression. An analyzer that only
+flags unsafe library calls needs additional loop/bounds analysis for this copy.
+Source-based analysis must use the recipe's compile configuration, including
+`-DIOTBENCH_CWE120_FIXTURE=1`, to satisfy the intentional build guard.
+
+### Explicit test build and automated validation
+
+From the repository root, run the isolated host regression as an unprivileged
+user with a C compiler supporting AddressSanitizer:
+
+```bash
+python3 scripts/test-service-buffer-overflow.py --local
+# Linux alternative using the existing builder (no downloads/network needed):
+docker compose run --rm yocto python3 /scripts/test-service-buffer-overflow.py --local
+```
+
+This builds temporary native and ASan executables with optimization, Fortify,
+stack protection and PIE, adding RELRO/NOW on Linux. It verifies ordinary
+compilation without the fixture definition fails. Normal label lengths 1, 21
+and 31 succeed on both builds, including fragmented sends. Malformed frames
+are rejected without sanitizer errors. Lengths 32, 104 and 1024 run **only on
+the ASan build** and must terminate unsuccessfully with
+`AddressSanitizer: stack-buffer-overflow`, `WRITE of size 1`, the label object
+and `handle_label_request` in the report, and no success response. Absolute
+addresses and process IDs vary with ASLR and are not test assertions.
+
+A temporary corrected control inserts the missing capacity check and repeats
+the socket tests: oversized labels must now be rejected without an ASan error.
+It is deleted after testing and never replaces the vulnerable firmware source.
+Runtime flag/environment omission must also be rejected before socket setup.
+Test completion prints `PASS` assertions and returns 0.
+
+Firmware builds require an explicit opt-in; the package is skipped otherwise:
+
+```bash
+IOTBENCH_ENABLE_CWE120_FIXTURE=1 \
+  FIRMWARE=router-cwe120-service-buffer-overflow docker compose run --rm yocto
+python3 scripts/test-service-buffer-overflow.py --device router
+```
+
+Compose passes this single opt-in to BitBake. For direct BitBake use, set
+`IOTBENCH_ENABLE_CWE120_FIXTURE = "1"` in the isolated build's `local.conf`.
+The recipe builds both ordinary and ASan executables from identical C source,
+preserving inherited `${CPPFLAGS}`, `${CFLAGS}` and `${LDFLAGS}`. Artifacts
+export to `deploy-images/<firmware fixture>/<machine>/`; `YOCTO_MACHINE`
+selects the architecture. ASan runtime availability is required for that target.
+
+Build and test every supported device:
+
+```bash
+for recipe in meta-iotbench/recipes-images/iotbench-*-cwe120-service-buffer-overflow.bb; do
+    firmware=$(basename "$recipe" .bb)
+    IOTBENCH_ENABLE_CWE120_FIXTURE=1 FIRMWARE="${firmware#iotbench-}" \
+      docker compose run --rm yocto || exit 1
+done
+python3 scripts/test-service-buffer-overflow.py --all
+```
+
+For manual guest validation, boot with
+`FIRMWARE=router-cwe120-service-buffer-overflow ./scripts/run-qemu.sh`, log in
+using the existing synthetic serial-console credentials, and run
+`sh /usr/share/iotbench/service-buffer-overflow/test-guest.sh router`.
+The script checks the fixture marker, device identity, executable permissions
+and disabled/inactive unit, starts the native unit for one **normal** request,
+then runs the socket/ASan regression unprivileged inside a bounded systemd unit.
+The host `--device` / `--all` modes automate this in disposable QEMU snapshots
+and save `validation-console.log` beside each exported image.
+
+### Isolation safeguards and limitations
+
+Ordinary firmware configurations cannot build this package. The C source also
+requires `IOTBENCH_CWE120_FIXTURE=1` at compilation. Startup requires both
+`--fixture-test` and environment `IOTBENCH_CWE120_FIXTURE=1`, and refuses UID 0.
+The disabled-by-default systemd unit additionally requires the gated recipe's
+`/etc/iotbench/cwe120-fixture-enabled` marker. A normal binary invocation does
+not start a listener. These are explicit research configuration guards, not a
+security boundary against an administrator intentionally enabling the fixture.
+
+The service runs as nobody/nogroup with an owner-only runtime directory and
+socket, no new privileges, AF_UNIX restriction, private network/tmp, read-only
+system/home restrictions, core suppression and CPU/memory/time/task limits.
+It never removes a pre-existing socket path. The QEMU launcher disables the
+network adapter entirely for these eleven fixtures; built-in device profiles
+remain available for firmware analysis. The host tests use private temporary
+directories and Unix sockets, suppress cores, enforce process timeouts and
+never send oversized inputs to the ordinary executable. The service handles
+one request then exits; each case starts a fresh process.
+
+ASan changes stack layout and requires substantial virtual address space, so
+guest resident-memory limits use cgroups rather than `RLIMIT_AS`. Stack
+canaries, ASLR, NX and other normal hardening are retained. Production use is
+unsupported. The benchmark demonstrates memory-safety detection only, with no
+exploit, code-execution assertion, privilege change or persistent application
+state. Target architectures lacking ASan support cannot run the instrumented
+test without supplying a supported toolchain/runtime.
+
+### Completed validation
+
+**Verified 2026-10-22:** macOS/Apple Clang and Linux/GCC host regressions passed,
+including the corrected temporary control. Three consecutive macOS runs passed
+after the acceptance handshake was added; the final Linux run used a container
+with networking disabled. All eleven `qemuarm64` images built/exported with
+Yocto packaging QA enabled and passed their guest regressions: disabled initial
+service, explicit normal request, unprivileged socket tests, valid 31-byte
+boundary, malformed-frame rejection, and ASan-confirmed out-of-bounds writes for
+32-, 104- and 1024-byte labels. Manifest checks confirmed the matching device
+profile, ASan runtime and sole CWE-120 vulnerability package in every image.
+The exported native/ASan ELF pair was also checked for PIE, RELRO/NOW,
+non-executable stack and stack canaries. A separate ordinary configuration
+confirmed BitBake skips the fixture without its opt-in.
+
+Each image directory contains `validation-console.log` and `rootfs.manifest`.
+Shared build, host-regression, manifest and opt-in evidence is saved under
+`deploy-images/router-cwe120-service-buffer-overflow/qemuarm64/` as
+`validation-build-all.log`, `validation-runtime-all.log`,
+`validation-local-macos.log`, `validation-local-linux.log`,
+`validation-manifests.log` and `validation-build-gate.log`.
+Other target architectures were not built or boot-tested.
 
 ## Weak Cipher: 3DES Device Backups
 

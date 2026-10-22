@@ -26,9 +26,23 @@ def limits():
 
 
 def request(endpoint, wire, fragment=False):
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    deadline = time.monotonic() + 5
+    while True:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(5)
-        client.connect(str(endpoint))
+        try:
+            client.connect(str(endpoint))
+            break
+        except (FileNotFoundError, ConnectionRefusedError):
+            # bind makes the path visible just before listen accepts connections.
+            client.close()
+            require(time.monotonic() < deadline, "Service connection timeout")
+            time.sleep(0.01)
+        except BaseException:
+            client.close()
+            raise
+    with client:
+        require(client.recv(1) == b"\x01", "Missing service readiness byte")
         if fragment:
             for byte in wire:
                 client.sendall(bytes([byte]))
@@ -55,9 +69,10 @@ def frame(field):
 def run_case(binary, wire, expected_status=0, diagnostic=False, fragment=False):
     with tempfile.TemporaryDirectory(prefix="label-") as temporary:
         endpoint = Path(temporary) / "service.sock"
-        environment = dict(os.environ, ASAN_OPTIONS="detect_leaks=0:abort_on_error=0:halt_on_error=1:symbolize=1:disable_coredump=1")
+        environment = dict(os.environ, IOTBENCH_CWE120_FIXTURE="1",
+                           ASAN_OPTIONS="detect_leaks=0:abort_on_error=0:halt_on_error=1:symbolize=1:disable_coredump=1")
         with tempfile.TemporaryFile() as errors:
-            process = subprocess.Popen([str(binary), "--socket", str(endpoint)],
+            process = subprocess.Popen([str(binary), "--fixture-test", "--socket", str(endpoint)],
                                        stdout=subprocess.DEVNULL, stderr=errors,
                                        env=environment, preexec_fn=limits)
             try:
@@ -73,13 +88,14 @@ def run_case(binary, wire, expected_status=0, diagnostic=False, fragment=False):
                 stderr = errors.read().decode(errors="replace")
                 if diagnostic:
                     require(status != 0 and "AddressSanitizer: stack-buffer-overflow" in stderr
-                            and "WRITE of size" in stderr and "handle_label_request" in stderr
-                            and "strcpy" in stderr and "label" in stderr,
+                            and "WRITE of size 1 " in stderr and "handle_label_request" in stderr
+                            and "label" in stderr,
                             f"Missing copy-specific ASan evidence: {status}\n{stderr}")
                     require(not response, "Oversized diagnostic request returned success")
                     print(stderr, end="", flush=True)
                 else:
-                    require(status == expected_status, f"Unexpected exit {status}: {stderr}")
+                    require(status == expected_status,
+                            f"Unexpected exit {status} from {binary.name}, frame={wire!r}: {stderr}")
                     require(response == (RESPONSE if status == 0 else b""), "Incorrect response")
                     require("AddressSanitizer" not in stderr, f"Unexpected ASan diagnostic: {stderr}")
             finally:
@@ -88,8 +104,16 @@ def run_case(binary, wire, expected_status=0, diagnostic=False, fragment=False):
                 process.wait(timeout=5)
 
 
-def regression(binary, diagnostic):
+def regression(binary, diagnostic, safe_control=False):
     require(os.geteuid() != 0, "Run socket tests as an unprivileged user")
+    for candidate in (binary, diagnostic):
+        for arguments, enabled in (([], "1"), (["--fixture-test"], "0")):
+            denied = subprocess.run([str(candidate), *arguments],
+                                    env=dict(os.environ, IOTBENCH_CWE120_FIXTURE=enabled),
+                                    capture_output=True, timeout=5, preexec_fn=limits)
+            require(denied.returncode == 2 and not denied.stdout
+                    and b"AddressSanitizer" not in denied.stderr, "Startup opt-in was bypassed")
+    print("PASS service refuses missing runtime flag or fixture configuration", flush=True)
     for candidate in (binary, diagnostic):
         for field in (b"SYNTHETIC_DEVICE_NAME", b"S", b"S" * 31):
             run_case(candidate, frame(field), fragment=True)
@@ -99,13 +123,19 @@ def regression(binary, diagnostic):
     for wire in malformed:
         run_case(diagnostic, wire, expected_status=2)
     print("PASS strict framing, termination, ASCII and protocol size rejection", flush=True)
-    for field in (b"S" * 32, b"SYNTHETIC_SERVICE_REQUEST_" * 4):
-        run_case(diagnostic, frame(field), diagnostic=True)
-    print("PASS socket input causes ASan-confirmed strcpy stack-buffer-overflow (CWE-120/CWE-121)", flush=True)
+    for field in (b"S" * 32, b"SYNTHETIC_SERVICE_REQUEST_" * 4, b"S" * 1024):
+        run_case(diagnostic, frame(field), expected_status=2, diagnostic=not safe_control)
+    if safe_control:
+        print("PASS corrected temporary control rejects all oversized labels without ASan errors", flush=True)
+    else:
+        print("PASS socket input causes ASan-confirmed unchecked copy stack-buffer-overflow (CWE-120/CWE-121)", flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fixture-test", required=True, action="store_true",
+                        help="explicitly opt into this isolated synthetic fixture test")
+    parser.add_argument("--safe-control", action="store_true", help="expect a corrected temporary test build")
     parser.add_argument("--binary", type=Path, default=Path("/usr/bin/fixture-label-service"))
     parser.add_argument("--asan", type=Path, default=Path("/usr/share/iotbench/service-buffer-overflow/fixture-label-service-asan"))
     parser.add_argument("--request", type=Path, help="send one normal request to an already running service")
@@ -114,4 +144,4 @@ if __name__ == "__main__":
         require(request(arguments.request, frame(b"SYNTHETIC_DEVICE_NAME")) == RESPONSE, "Service response mismatch")
         print("PASS registered systemd service endpoint reaches the native handler", flush=True)
     else:
-        regression(arguments.binary, arguments.asan)
+        regression(arguments.binary, arguments.asan, arguments.safe_control)

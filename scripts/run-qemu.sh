@@ -140,8 +140,20 @@ CPU_ARG=""
 [ -n "${QCPU}" ] && CPU_ARG="-cpu ${QCPU}"
 
 echo "Firmware: ${FIRMWARE} (${MACHINE})"
-echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
-[ -n "${EXTRA_ENDPOINT}" ] && echo "${EXTRA_ENDPOINT}"
+IP_APPEND="ip=dhcp"
+case "${FIRMWARE}" in
+    *-cwe120-service-buffer-overflow)
+        # The CWE-120 fixture is exclusively local, including during validation.
+        set -- -nic none
+        IP_APPEND=""
+        echo "Local Unix-socket fixture; networking disabled (quit with Ctrl-A, then X)"
+        ;;
+    *)
+        set -- -netdev "${NETDEV}" -device virtio-net-pci,netdev=net0
+        echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
+        [ -z "${EXTRA_ENDPOINT}" ] || echo "${EXTRA_ENDPOINT}"
+        ;;
+esac
 
 # shellcheck disable=SC2086
 exec "${QBIN}" \
@@ -151,11 +163,10 @@ exec "${QBIN}" \
     -m 256 \
     ${SNAPSHOT} \
     -kernel "${DEPLOY_DIR}/${KERNEL}" \
-    -append "root=/dev/vda rw console=${CONSOLE} ip=dhcp ${APPEND_EXTRA}" \
+    -append "root=/dev/vda rw console=${CONSOLE} ${IP_APPEND} ${APPEND_EXTRA}" \
     -drive "id=disk0,file=${ROOTFS},if=none,format=raw" \
     -device virtio-blk-pci,drive=disk0 \
-    -netdev "${NETDEV}" \
-    -device virtio-net-pci,netdev=net0 \
+    "$@" \
     -object rng-random,filename=/dev/urandom,id=rng0 \
     -device virtio-rng-pci,rng=rng0 \
     -nographic

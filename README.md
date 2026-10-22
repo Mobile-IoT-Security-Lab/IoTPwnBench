@@ -134,6 +134,75 @@ Payloads and expected exploit signals for these scenarios are documented in
 That guide also identifies the canonical attacker position for each image:
 remote HTTP, remote network service, or a local `routerweb` foothold.
 
+### Local service buffer copy (CWE-120)
+
+All eleven device profiles have a separate
+`<device>-cwe120-service-buffer-overflow` fixture. A small native C service
+copies a framed synthetic label into a 32-byte stack buffer without checking
+the destination capacity. Its interface is a private Unix-domain socket; the
+QEMU launcher disables networking for these images. The service is disabled at
+boot and requires explicit fixture configuration at build and startup.
+Compiler hardening is retained, and a separate ASan executable identifies the
+out-of-bounds write during local regression tests.
+
+```bash
+python3 scripts/test-service-buffer-overflow.py --local
+IOTBENCH_ENABLE_CWE120_FIXTURE=1 \
+  FIRMWARE=router-cwe120-service-buffer-overflow docker compose run --rm yocto
+python3 scripts/test-service-buffer-overflow.py --device router
+```
+
+#### Manual test inside QEMU
+
+After building the fixture, boot it from the host repository root:
+
+```bash
+FIRMWARE=router-cwe120-service-buffer-overflow ./scripts/run-qemu.sh
+```
+
+Log into the guest serial console with `root` / `routeradmin`. Paste the following
+three blocks into the guest console to send one oversized request directly.
+
+1. Start the ASan service as an unprivileged user:
+
+   ```sh
+   rm -f /tmp/cwe120-manual.sock
+   setpriv --reuid=65534 --regid=65534 --clear-groups \
+     env IOTBENCH_CWE120_FIXTURE=1 ASAN_OPTIONS=detect_leaks=0 \
+     /usr/share/iotbench/service-buffer-overflow/fixture-label-service-asan \
+     --fixture-test --socket /tmp/cwe120-manual.sock \
+     2>/tmp/cwe120-asan.log &
+   ```
+
+2. Send a 32-byte label using a direct Python socket client:
+
+   ```sh
+   python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/tmp/cwe120-manual.sock"); s.recv(1); data=b"S"*32; s.sendall(len(data).to_bytes(2,"big")+data); s.shutdown(socket.SHUT_WR); print(s.recv(4096))'
+   ```
+
+3. Read the sanitizer report:
+
+   ```sh
+   cat /tmp/cwe120-asan.log
+   ```
+
+Expected: `AddressSanitizer: stack-buffer-overflow`, `WRITE of size 1`, and
+`handle_label_request` in the report. The client receives an empty response
+(`b''`) or a connection reset. The 32-byte label needs 33 bytes including its
+terminating NUL, overflowing the 32-byte destination.
+
+For a normal request, repeat all three blocks with `*31` instead of `*32` in
+step 2. Expect `b'SYNTHETIC_LABEL_UPDATED\n'` and no ASan error; the synthetic
+fixture notice in the log is normal. The service handles one request and exits,
+so restart it with step 1 for every request. These steps invoke no test-runner
+scripts. Quit QEMU with **Ctrl-A**, then **X**.
+
+Ordinary builds skip the CWE-120 package. A full catalog build that includes
+these fixtures must explicitly opt in with
+`IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`.
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--local-service-buffer-copy-cwe-120)
+for all device mappings, input flow, safeguards and expected sanitizer results.
+
 ### Weak cipher: Triple DES (CWE-327)
 
 Every device also has a separate firmware that encrypts and decrypts device
