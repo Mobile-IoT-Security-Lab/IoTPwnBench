@@ -1,13 +1,26 @@
-# Scenario Payloads
+# Francesco Scenario Payloads
 
 All vulnerability scenarios listed in this document were implemented by
 Francesco in the IoTBench repository. The corresponding catalog rows use
 `OWNER = Francesco`, `Implemented = V`, and one implemented test per firmware
 scenario.
 
+The complete 34-image benchmark index, including the shared CWE-78 device
+scenarios, is in [device-payloads.md](device-payloads.md).
+
 These payloads are for the intentionally vulnerable IoTBench firmware images
 only. Boot each image in an isolated QEMU lab and use the dashboard at
 `http://127.0.0.1:8080` unless the row says that a guest console is required.
+
+Start a scenario from the repository root in the first terminal:
+
+```bash
+FIRMWARE=<firmware-id> ./scripts/run-qemu.sh
+```
+
+Run the row's payload from a second terminal or through the dashboard. The
+runner automatically forwards SSH to `127.0.0.1:2222` and the vulnerable TCP
+service to `127.0.0.1:9090` for the images that require them.
 
 | Firmware id | Catalog scenario | Payload / exploit indicator | Expected signal |
 | --- | --- | --- | --- |
