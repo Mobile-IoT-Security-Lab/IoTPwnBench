@@ -1,0 +1,50 @@
+{
+  "native": {
+    "username": "fixture798_native",
+    "password": "SYNTH_ONLY_798_native_P9!",
+    "file": "credential.c",
+    "representation": "C string constants in ELF .rodata"
+  },
+  "shell": {
+    "username": "fixture798_shell",
+    "password": "SYNTH_ONLY_798_shell_P9!",
+    "file": "credentials.sh",
+    "representation": "single quoted shell assignments (read as data)"
+  },
+  "ini": {
+    "username": "fixture798_ini",
+    "password": "SYNTH_ONLY_798_ini_P9!",
+    "file": "auth.ini",
+    "representation": "INI separate fields"
+  },
+  "json": {
+    "username": "fixture798_json",
+    "password": "SYNTH_ONLY_798_json_P9!",
+    "file": "auth.json",
+    "representation": "JSON separate fields"
+  },
+  "xml": {
+    "username": "fixture798_xml",
+    "password": "SYNTH_ONLY_798_xml_P9!",
+    "file": "auth.xml",
+    "representation": "XML child elements"
+  },
+  "yaml": {
+    "username": "fixture798_yaml",
+    "password": "SYNTH_ONLY_798_yaml_P9!",
+    "file": "auth.yaml",
+    "representation": "YAML flat mapping"
+  },
+  "connection-string": {
+    "username": "fixture798_connection_string",
+    "password": "SYNTH_ONLY_798_connection_string_P9!",
+    "file": "connection.conf",
+    "representation": "synthetic connection string"
+  },
+  "base64": {
+    "username": "fixture798_base64",
+    "password": "SYNTH_ONLY_798_base64_P9!",
+    "file": "encoded.json",
+    "representation": "Base64 of username:password"
+  }
+}

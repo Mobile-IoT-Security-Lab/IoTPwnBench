@@ -1,0 +1,38 @@
+{
+  "scenario": "cwe787-native-buffer-overflow",
+  "primary_cwe": "CWE-787",
+  "contributing_cwes": [
+    "CWE-20"
+  ],
+  "broader_cwes": [
+    "CWE-119"
+  ],
+  "intentional_defects": 1,
+  "source": "fixture-buffer-write.c",
+  "input_line": 23,
+  "transport_check_line": 31,
+  "sink_line": 51,
+  "entry_point": "stdin: 2-byte unsigned big-endian length, printable ASCII payload, EOF",
+  "input_validation": "Exact frame, length <= 256, all bytes 0x20..0x7e; argc == 1",
+  "data_flow": [
+    "stdin/getchar",
+    "read_configuration",
+    "length and payload",
+    "apply_configuration",
+    "configuration[index] = payload[index]"
+  ],
+  "destination": "static unsigned char configuration[64]",
+  "storage": "global",
+  "destination_capacity": 64,
+  "transport_capacity": 256,
+  "missing_check": "length <= sizeof(configuration)",
+  "first_invalid_index": 64,
+  "minimal_witness_length": 65,
+  "minimal_witness_hex": "00414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+  "safe_boundary_hex": "004041414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+  "expected_evidence": "ASan global-buffer-overflow, WRITE of size 1 at sink_line; exit code 86 in automated tests",
+  "normal_build_overflow_result": "Undefined behavior: no portable exit status or crash is promised",
+  "fixed_control": "Temporary test-only insertion of the missing destination check; no second firmware fixture",
+  "string_terminator": "None: length-delimited byte array, never used as a C string",
+  "compile_opt_in": "IOTBENCH_BUFFER_FIXTURE_ENABLED=1; otherwise disabled exit-77 stub"
+}

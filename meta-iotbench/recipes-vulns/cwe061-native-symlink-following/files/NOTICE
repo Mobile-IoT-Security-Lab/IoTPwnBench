@@ -1,0 +1,3 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - NOT FOR DEPLOYMENT
+Exactly one CWE-61 defect (broader CWE-59): missing final-component symlink rejection.
+Only run via the disposable namespace test runner. No startup service is installed.

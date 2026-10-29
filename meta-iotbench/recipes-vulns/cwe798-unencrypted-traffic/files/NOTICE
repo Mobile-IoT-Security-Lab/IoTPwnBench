@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+One weakly configured Telnet scenario: CWE-798, CWE-287, CWE-276.
+Public synthetic credentials: telnet-fixture / Fixture-Telnet-Only-42.
+Loopback only. Plaintext authentication and predefined data. No OS shell.
+Build requires explicit fixture mode and opt-in on supported QEMU targets.
+Runtime requires --fixture-test. One connection; finite lifetime; no boot startup.

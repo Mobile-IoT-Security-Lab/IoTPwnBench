@@ -1,0 +1,110 @@
+{
+  "conf-password": {
+    "file": "auth.conf",
+    "parser": "kv",
+    "field": "password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_PASSWORD_001",
+    "principal": "fixture_admin"
+  },
+  "cfg-admin": {
+    "file": "admin.cfg",
+    "parser": "kv",
+    "field": "admin_password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_ADMIN_SECRET"
+  },
+  "ini-root": {
+    "file": "account.ini",
+    "parser": "ini",
+    "field": "auth.root_password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_ROOT_PASSWORD"
+  },
+  "env-db": {
+    "file": "database.env",
+    "parser": "kv",
+    "field": "DB_PASSWORD",
+    "encoding": "plaintext",
+    "value": "FIXTURE_DATABASE_PASSWORD"
+  },
+  "json-token": {
+    "file": "service.json",
+    "parser": "json",
+    "field": "auth_token",
+    "encoding": "plaintext",
+    "value": "FIXTURE_AUTH_TOKEN_001"
+  },
+  "xml-api": {
+    "file": "service.xml",
+    "parser": "xml",
+    "field": "api_key",
+    "encoding": "plaintext",
+    "value": "FIXTURE_API_KEY_001"
+  },
+  "shell-password": {
+    "file": "credentials.sh",
+    "parser": "kv",
+    "field": "PaSsWoRd",
+    "encoding": "plaintext",
+    "value": "FIXTURE_SHELL_PASSWORD_001"
+  },
+  "c-password": {
+    "file": "credential.c",
+    "parser": "c",
+    "field": "fixture_secret",
+    "encoding": "plaintext",
+    "value": "FIXTURE_C_PASSWORD_001",
+    "native_reference": "fixture_auth (enabled native source); fixture-auth.py (source configuration simulation)"
+  },
+  "header-password": {
+    "file": "credential.h",
+    "parser": "c",
+    "field": "fixture_secret",
+    "encoding": "plaintext",
+    "value": "FIXTURE_HEADER_PASSWORD_001",
+    "native_reference": "fixture_auth (enabled native source); fixture-auth.py (source configuration simulation)"
+  },
+  "app-password": {
+    "file": "application.properties",
+    "parser": "kv",
+    "field": "service.auth.password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_APPLICATION_PASSWORD_001"
+  },
+  "init-password": {
+    "file": "init-auth.sh",
+    "parser": "kv",
+    "field": "PASSWORD",
+    "encoding": "plaintext",
+    "value": "FIXTURE_INIT_PASSWORD_001"
+  },
+  "log-password": {
+    "file": "authentication.log",
+    "parser": "kv",
+    "field": "password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_LOG_PASSWORD_001"
+  },
+  "kv-password": {
+    "file": "credentials.txt",
+    "parser": "kv",
+    "field": "Password",
+    "encoding": "plaintext",
+    "value": "FIXTURE_TEXT_PASSWORD_001"
+  },
+  "json-base64": {
+    "file": "encoded.json",
+    "parser": "json",
+    "field": "auth_token_b64",
+    "encoding": "base64",
+    "value": "FIXTURE_ENCODED_TOKEN_001"
+  },
+  "env-base64": {
+    "file": "encoded.env",
+    "parser": "kv",
+    "field": "PASSWORD_B64",
+    "encoding": "base64",
+    "value": "FIXTURE_ENCODED_PASSWORD_001"
+  }
+}

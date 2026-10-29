@@ -1,0 +1,20 @@
+{
+  "scenario": "Weakly Configured Telnet – Unencrypted Traffic",
+  "primary_cwe": "CWE-798",
+  "related_cwes": ["CWE-287", "CWE-276"],
+  "single_scenario": true,
+  "service_source": "fixture-telnet.py",
+  "credential_symbols": ["FIXTURE_USER", "FIXTURE_PASSWORD"],
+  "authentication_function": "authenticated",
+  "weak_authentication": "password-only ignores the asserted nonempty username",
+  "authentication_config": "/etc/iotbench/telnet-auth.json",
+  "authentication_config_mode": "0666",
+  "expected_config_mode": "0644",
+  "bind": "127.0.0.1",
+  "port": 2323,
+  "transport": "plaintext Telnet-compatible NVT over TCP",
+  "commands": ["STATUS", "HELP", "QUIT"],
+  "username": "telnet-fixture",
+  "password": "Fixture-Telnet-Only-42",
+  "synthetic_only": true
+}

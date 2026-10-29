@@ -1,0 +1,4 @@
+INTENTIONALLY INSECURE SYNTHETIC CWE-798 FIXTURE. RESEARCH ONLY.
+Exactly one credential scenario per variant. No OS or external authentication.
+Scripts and native source are inert data. Base64 is encoding, not encryption.
+Run the local simulation with python3 fixture-auth.py --isolated-fixture.

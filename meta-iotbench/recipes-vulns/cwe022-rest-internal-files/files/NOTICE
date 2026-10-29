@@ -1,0 +1,8 @@
+INTENTIONALLY INSECURE SYNTHETIC RESEARCH FIXTURE. NOT FOR DEPLOYMENT.
+One CWE-22/CWE-73 flow: GET /api/config accepts an unchecked relative path
+and can read ../restricted/marker.txt outside fs/api, but inside fs.
+Linux openat2 RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV
+confines every request file open to the pre-opened synthetic fs directory.
+No fallback is allowed on kernels without openat2. Unix-domain sockets only.
+No init hooks, shell invocation, uploads, file writes or privilege changes.
+Requires explicit fixture build configuration and --isolated-fixture at runtime.

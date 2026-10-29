@@ -1,0 +1,18 @@
+{
+  "normal": "label=sensor_01\n",
+  "os": "label=sensor' > normal.txt; printf 'JAVA_OS_MARKER\\n' > os-marker.txt; #\n",
+  "os_expected": {"normal.txt": "sensor\n", "os-marker.txt": "JAVA_OS_MARKER\n"},
+  "app": "label=sensor;mark\n",
+  "app_expected": {"normal.txt": "sensor\n", "app-marker.txt": "JAVA_APP_MARKER\n"},
+  "invalid": {
+    "empty-stream": "",
+    "empty-label": "label=\n",
+    "wrong-field": "name=sensor\n",
+    "missing-newline": "label=sensor",
+    "extra-request": "label=sensor\nlabel=other\n",
+    "nul": "label=sen\u0000sor\n",
+    "crlf": "label=sensor\r\n",
+    "embedded-lf": "label=sen\nsor\n",
+    "tab": "label=sen\tsor\n"
+  }
+}

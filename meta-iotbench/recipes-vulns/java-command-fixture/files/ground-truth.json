@@ -1,0 +1,28 @@
+{
+  "contract": "one ASCII label=<value> LF EOF request; value [A-Za-z0-9_-]{1,128}",
+  "intentional_defects_per_fixture": 1,
+  "defect": "FixtureRequest.read checks printable ASCII instead of the label alphabet",
+  "source": "System.in",
+  "field": "label",
+  "fixtures": {
+    "os": {
+      "jar": "fixture-os-command.jar",
+      "primary_cwe": "CWE-78",
+      "broader_cwe": "CWE-77",
+      "contributing_cwe": "CWE-20",
+      "construction": "FixtureOsCommand.main: String command concatenation",
+      "sink": "ProcessBuilder(/bin/sh, -c, command).start",
+      "marker": "/work/os-marker.txt",
+      "contents": "JAVA_OS_MARKER\n"
+    },
+    "app": {
+      "jar": "fixture-app-command.jar",
+      "primary_cwe": "CWE-77",
+      "contributing_cwe": "CWE-20",
+      "construction": "FixtureAppCommand.main: record + label",
+      "sink": "FixtureAppCommand.interpret splits semicolon-separated statements",
+      "marker": "/work/app-marker.txt",
+      "contents": "JAVA_APP_MARKER\n"
+    }
+  }
+}

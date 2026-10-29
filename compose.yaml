@@ -3,7 +3,7 @@ x-builder: &builder
   image: ${YOCTO_BUILDER_IMAGE:-yocto-builder}:6.0.3
   environment: &builder-environment
     YOCTO_MACHINE: ${YOCTO_MACHINE:-qemuarm64}
-    YOCTO_LAYERS: openembedded-core/meta meta-openembedded/meta-oe meta-openembedded/meta-python meta-openembedded/meta-networking meta-openjdk meta-iotbench
+    YOCTO_LAYERS: openembedded-core/meta meta-openembedded/meta-oe meta-openembedded/meta-python meta-openembedded/meta-networking meta-openembedded/meta-webserver meta-openjdk meta-iotbench
     # Which firmware to build: matches recipes-images/iotbench-${FIRMWARE}.bb
     FIRMWARE: ${FIRMWARE:-router-cwe078-os-command-injection}
     # Explicit opt-in; the CWE-120 package is unavailable in ordinary builds.
@@ -22,6 +22,9 @@ services:
   # Build the selected firmware and export it to ./deploy-images/<firmware>.
   yocto:
     <<: *builder
+    # The entrypoint prepares /export, then drops to the yocto user.
+    user: "0:0"
+    entrypoint: ["bash", "/scripts/container-entrypoint.sh"]
     command: ["bash", "/scripts/container-build-and-export.sh"]
 
   # Fill the cache only: docker compose --profile warm run --rm warm-cache

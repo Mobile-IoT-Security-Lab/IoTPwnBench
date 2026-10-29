@@ -1,0 +1,51 @@
+# Standalone test config. Never include the distribution httpd.conf.
+ServerRoot "/fixture"
+ServerName 127.0.0.1
+Listen 127.0.0.1:18080
+Listen 127.0.0.1:18081
+LoadModule mpm_prefork_module /modules/mod_mpm_prefork.so
+LoadModule authz_core_module /modules/mod_authz_core.so
+LoadModule unixd_module /modules/mod_unixd.so
+LoadModule alias_module /modules/mod_alias.so
+LoadModule cgi_module /modules/mod_cgi.so
+User #1000
+Group #1000
+PidFile /state/httpd.pid
+DefaultRuntimeDir /state
+ErrorLog /state/error.log
+LogLevel warn
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off
+Timeout 5
+StartServers 1
+MinSpareServers 1
+MaxSpareServers 2
+MaxRequestWorkers 4
+MaxConnectionsPerChild 100
+LimitRequestBody 4096
+DocumentRoot /empty
+<Directory />
+    AllowOverride None
+    Options None
+    Require all denied
+</Directory>
+<VirtualHost 127.0.0.1:18080>
+    ScriptAlias /app /fixture/app.cgi
+    <Directory /fixture>
+        Options +ExecCGI -Indexes
+        Require all granted
+        <FilesMatch "^(?!app[.]cgi$)">
+            Require all denied
+        </FilesMatch>
+    </Directory>
+</VirtualHost>
+# Second origin hosts only the harmless local CSRF form used by the browser test.
+<VirtualHost 127.0.0.1:18081>
+    DocumentRoot /attacker
+    <Directory /attacker>
+        Require all granted
+        Options None
+        ForceType text/html
+    </Directory>
+</VirtualHost>

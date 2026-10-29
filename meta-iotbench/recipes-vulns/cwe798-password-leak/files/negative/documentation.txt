@@ -1,0 +1,4 @@
+# Documentation examples only; do not classify comments.
+# password=EXAMPLE_VALUE_ONLY
+# auth_token=EXAMPLE_TOKEN_ONLY
+This guide describes the password field without supplying a credential.

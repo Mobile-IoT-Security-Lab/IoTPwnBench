@@ -1,0 +1,27 @@
+{
+  "format": "Java ObjectOutputStream protocol v5, one synthetic root object, raw bytes on stdin until EOF",
+  "generated": {
+    "normal": "OK sensor=sensor_01 reading=23",
+    "marker": "UNEXPECTED_TYPE",
+    "invalid-data": "INVALID_DATA",
+    "null": "UNEXPECTED_TYPE",
+    "array-at-limit": "UNEXPECTED_TYPE",
+    "array-over-limit": "FILTER_REJECTED",
+    "depth-at-limit": "UNEXPECTED_TYPE",
+    "depth-over-limit": "FILTER_REJECTED",
+    "references-over-limit": "FILTER_REJECTED",
+    "bytes-at-limit": "UNEXPECTED_TYPE",
+    "bytes-over-limit": "INPUT_TOO_LARGE"
+  },
+  "controls": {
+    "empty": "EMPTY_INPUT",
+    "truncated-header": "TRUNCATED_STREAM",
+    "truncated-object": "TRUNCATED_STREAM",
+    "invalid-header": "INVALID_STREAM",
+    "oversized-garbage": "INPUT_TOO_LARGE"
+  },
+  "samples_base64": {
+    "normal": "rO0ABXNyADBvcmcuaW90YmVuY2guZml4dHVyZS5kZXNlcmlhbGl6YXRpb24uRml4dHVyZURhdGEAAAAAAAAAAQIAAkkAB3JlYWRpbmdMAAZzZW5zb3J0ABJMamF2YS9sYW5nL1N0cmluZzt4cAAAABd0AAlzZW5zb3JfMDE=",
+    "marker": "rO0ABXNyADJvcmcuaW90YmVuY2guZml4dHVyZS5kZXNlcmlhbGl6YXRpb24uRml4dHVyZU1hcmtlcgAAAAAAAAABAgAAeHA="
+  }
+}

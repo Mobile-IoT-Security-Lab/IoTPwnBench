@@ -1,0 +1,18 @@
+[Unit]
+Description=Explicit synthetic FTP write-rights test (never enabled at boot)
+ConditionPathExists=/run/iotbench-ftp-write-test
+
+[Service]
+Type=simple
+ExecStart=@SBINDIR@/vsftpd /etc/iotbench/vsftpd-write-rights.conf
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/iotbench-ftp/bad /srv/iotbench-ftp/control
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SYS_CHROOT
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The authentication broker needs setuid/setgid/chroot only.
+# Every authenticated FTP file operation runs as unprivileged ftpfixture.

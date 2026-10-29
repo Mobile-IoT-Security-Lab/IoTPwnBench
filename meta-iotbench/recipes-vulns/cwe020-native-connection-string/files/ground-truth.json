@@ -1,0 +1,37 @@
+{
+  "primary_cwe": "CWE-20",
+  "intentional_defects": 1,
+  "binary": "fixture-connection",
+  "source": "fixture-connection.c",
+  "connector": "SQLite3 native C API; file: URI",
+  "caller_field": "cache (intended values: private or shared)",
+  "fixed_parameters": {
+    "mode": "ro",
+    "resource": "new private synthetic fixture.db per invocation",
+    "vfs": "unix"
+  },
+  "transport": "u16 big-endian length, 0..256 printable ASCII bytes, EOF; printable ASCII percent escapes only",
+  "normal_input": "private",
+  "injection_input": "private&mode=rw#",
+  "normal_readonly": 1,
+  "injection_readonly": 0,
+  "marker": "SYNTHETIC_CONNECTION_RESOURCE",
+  "flow": [
+    "getchar",
+    "read_cache",
+    "construct_connection",
+    "snprintf",
+    "sqlite3_open_v2",
+    "sqlite3_db_readonly"
+  ],
+  "defect": "Missing exact cache-value validation allows URI syntax; fragment hides the fixed mode=ro suffix.",
+  "isolation": [
+    "unprivileged matching real/effective IDs",
+    "private mkdtemp database",
+    "only Unix VFS registered",
+    "seccomp denies socket/connect/exec",
+    "no_new_privs",
+    "no core dumps"
+  ],
+  "query": "SELECT marker FROM fixture_resource WHERE id=1"
+}

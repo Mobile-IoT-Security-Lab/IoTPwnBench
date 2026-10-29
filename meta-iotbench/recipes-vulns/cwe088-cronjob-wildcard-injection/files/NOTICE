@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - NOT FOR DEPLOYMENT
+One scenario: filenames in inbox expand to maintenance arguments without --.
+The root crontab role is simulated. Nothing installs or starts a cron daemon.
+The C helper only parses argv and prints diagnostics; it does not open operands,
+execute commands, change privileges, listen on a network or write files.
+Explicit fixture builds and a supported QEMU machine are required.

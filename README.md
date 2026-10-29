@@ -37,6 +37,39 @@ scripts/
 The build also uses `meta-openembedded/meta-oe`, pinned to a revision compatible
 with the `wrynose` series, for the PHP recipe.
 
+## Export permissions
+
+The Compose `yocto` service prepares the export directory at startup, then
+drops to the non-root `yocto` account before invoking BitBake. The directory
+keeps its host owner and group; group write and setgid let the builder and
+host owner share exported files even when their numeric user IDs differ.
+The entrypoint checks writability as the build user before starting the build.
+Use `docker compose up --build --force-recreate yocto` to apply this to an
+existing container; restarting an old container does not update its settings.
+
+### Testing on Linux without host QEMU
+
+After the firmware build, run `./scripts/run-qemu-docker.sh` to reuse native
+QEMU from the `yocto-build` volume and `zstd` from the builder image.
+This Linux-only launcher uses host networking with the existing loopback-only
+port forwards, a non-root container, read-only exports and a temporary rootfs.
+It supports `FIRMWARE`, `YOCTO_MACHINE` and `QEMU_HTTP_PORT`.
+For a background router test:
+
+```bash
+QEMU_DETACH=1 QEMU_HTTP_PORT=18080 ./scripts/run-qemu-docker.sh
+curl http://127.0.0.1:18080/
+docker stop iotbench-qemu-router-cwe078-os-command-injection-qemuarm64
+```
+
+Guest writes are discarded when the container stops. The native QEMU sysroot
+must remain in the build volume. To access the dashboard from your laptop,
+forward the server loopback port with SSH.
+
+The FTP test runner (`python3 scripts/test-ftp-write-rights.py --device router`)
+also selects this Docker runtime when native QEMU or zstd is missing. Use
+`--qemu-backend native` or `--qemu-backend docker` to select one explicitly.
+
 ## Devices and peripherals
 
 A firmware is a **device profile** plus **one vulnerability**. The device profile
@@ -202,6 +235,117 @@ these fixtures must explicitly opt in with
 `IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`.
 See [docs/luca-payloads.md](docs/luca-payloads.md#buffer-overflow-esposto-tramite-service-interface)
 for all device mappings, input flow, safeguards and expected sanitizer results.
+
+### Weakly configured SSH: PermitEmptyPasswords (CWE-521)
+
+Every device has a separate `<device>-cwe521-permit-empty-passwords` synthetic
+firmware. This configuration-only fixture installs `/etc/ssh/sshd_config` with
+`PermitEmptyPasswords yes` and `PasswordAuthentication yes`, retaining
+`PermitRootLogin no`. It installs no SSH daemon or empty-password accounts.
+The image recipes exclude OpenSSH server and Dropbear packages and validate
+the root filesystem during the build. No SSH forwarding is added to QEMU.
+
+Offline positive/negative tests and optional native OpenSSH `-t`/`-T` checks:
+
+```bash
+python3 scripts/test-ssh-empty-passwords.py
+```
+
+Build instructions, safeguards and limitations are in
+[docs/marco-payloads.md](docs/marco-payloads.md).
+
+### Weakly configured Telnet: unencrypted traffic (CWE-798/287/276)
+
+All eleven devices have an opt-in `<device>-cwe798-unencrypted-traffic` image.
+One synthetic Telnet service combines fixed public credentials, a password-only
+identity check and a world-writable authentication policy. It binds only
+`127.0.0.1`, returns predefined responses and never starts an OS shell.
+
+```bash
+python3 scripts/test-telnet-unencrypted-traffic.py --static
+python3 scripts/test-telnet-unencrypted-traffic.py --local --isolated-fixture
+FIRMWARE=router-cwe798-unencrypted-traffic docker compose run --rm \
+  -e IOTBENCH_ENABLE_TELNET_FIXTURE=1 yocto
+```
+
+Production/default build configurations cannot resolve the fixture package.
+The catalog builder skips these images unless explicitly opted in. No Telnet
+port forwarding or boot enablement is added. Packet-capture tests, build gates
+and guest instructions are in
+[docs/marco-payloads.md](docs/marco-payloads.md#weakly-configured-telnet--unencrypted-traffic-cwe-798287276).
+
+### Bad SUDO Rights: allow changes to environment variables (CWE-798)
+
+Each device has a separate opt-in sudo environment fixture. The locked synthetic
+user `fixtureenv` can run only `fixture-sudo-env --fixture-test` as root, with
+three synthetic environment variables preserved. The native C helper returns
+fixed diagnostics, including one gated by a public hard-coded test credential.
+It cannot execute commands or load user-selected files or libraries.
+
+| Firmware id | CWE | Single scenario |
+| --- | --- | --- |
+| `doorlock-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `envsensor-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `healthmonitor-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `ipcamera-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `plc-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `router-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `smartbulb-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `smarthub-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `smartplug-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `smartspeaker-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+| `thermostat-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+
+```bash
+python3 scripts/test-sudo-env-fixture.py --static
+python3 scripts/test-sudo-env-fixture.py --local --isolated-fixture
+FIRMWARE=router-cwe798-sudo-environment docker compose run --rm \
+  -e IOTBENCH_ENABLE_SUDO_ENV_FIXTURE=1 yocto
+```
+
+The catalog builder skips this family unless opted in. Production/default
+configuration cannot provide its package. Real sudo-policy VM tests, guest
+tests, expected responses and the distinction between the environment-policy
+defect and its CWE-798 credential association are documented in
+[Marco's payload notes](docs/marco-payloads.md#bad-sudo-rights--allow-changes-to-environment-variables-cwe-798).
+
+### Cronjob wildcard injection (CWE-88/78/269)
+
+The opt-in `<device>-cwe088-cronjob-wildcard-injection` scenario covers all eleven
+device profiles. An inert cron configuration expands inbox filenames into a
+native diagnostic-only helper's arguments. An option-like filename selects a
+fixed diagnostic; the secure `--` control treats it as an operand. The privileged
+role is simulated, with no shell execution, UID change or real cron daemon.
+
+```bash
+python3 scripts/test-cron-wildcard-fixture.py --isolated-fixture
+FIRMWARE=router-cwe088-cronjob-wildcard-injection docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE=1 yocto
+```
+
+The catalog skips these images by default, and production configurations cannot
+provide the fixture package. See [the cron wildcard fixture guide](docs/marco-payloads.md#cronjob-wildcard-injection-cwe-8878269)
+for build guards, filename data flow, exact diagnostics and validation limits.
+
+### Password Leak: file types and credential patterns (CWE-798)
+
+The opt-in `<device>-cwe798-password-leak-<variant>` family provides fifteen
+separate credential scenarios for each of the eleven device profiles (165 image
+recipes). Each image exposes one predefined synthetic credential in one file,
+with a local authentication simulation and negative scanning controls. Two
+variants use reversible Base64 encoding. Nothing connects to an external
+authentication service or runs at boot.
+
+```bash
+python3 scripts/test-password-leak-fixture.py --isolated-fixture
+FIRMWARE=router-cwe798-password-leak-conf-password docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=1 yocto
+```
+
+Default/production builds cannot provide these packages; the catalog skips the
+family unless explicitly enabled. See [Marco's Password Leak guide](docs/marco-payloads.md#password-leak--different-file-types-and-patterns-cwe-798)
+for variants, inventory, exact finding manifests, native builds and validation
+limits.
 
 ### Weak cipher: Triple DES
 
@@ -1576,6 +1720,48 @@ See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--integer
 for per-device sources, exact flow, batch builds, offline ELF checks, remediation
 and completed verification results.
 
+### Native C buffer overflow (CWE-787; contributing CWE-20; broader CWE-119)
+
+Each device category has one `cwe787-native-buffer-overflow` image. A native C
+configuration utility reads a bounded binary frame from stdin, validates its
+format, then uses its length for indexed writes into a smaller global array.
+The single missing destination-length check is the intentional vulnerability.
+CWE-20 and CWE-119 are associations for the same defect, without duplicate
+images. These minimal images retain device metadata and omit device services.
+
+| Firmware id | Primary CWE | Single scenario |
+| --- | --- | --- |
+| `doorlock-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `envsensor-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `healthmonitor-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `ipcamera-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `plc-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `router-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `smartbulb-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `smarthub-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `smartplug-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `smartspeaker-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+| `thermostat-cwe787-native-buffer-overflow` | CWE-787 | Native C unchecked configuration write |
+
+```bash
+/usr/bin/python3 scripts/test-native-buffer-overflow.py --local
+FIRMWARE=router-cwe787-native-buffer-overflow docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1 yocto
+FIRMWARE=router-cwe787-native-buffer-overflow ./scripts/run-qemu.sh
+# Guest root serial console; helper invocations run as UID/GID 65534:
+sh /usr/share/iotbench/native-buffer-overflow/test-guest.sh router
+```
+
+The host regression requires Python 3.7+, Make, binutils and a C compiler with ASan support and checks
+the precise out-of-bounds write plus a corrected temporary control. Ordinary
+firmware ELFs retain build hardening and have no sanitizer dependency. QEMU
+runs this family without networking. Production configuration skips the package;
+`scripts/build-all.sh` skips these images unless
+`IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1` is set. Optional
+`IOTBENCH_NATIVE_BUFFER_ASAN=1` adds a target diagnostic ELF; the native
+Makefile also provides an `asan` target. See [Marco's payload notes](docs/marco-payloads.md#native-c-buffer-overflow-cwe-787-cwe-20-cwe-119)
+for framing, expected findings, build steps, and validation limits.
+
 ### Device taxonomy
 
 The five categories are chosen to span the device classes and protocols found in
@@ -1597,6 +1783,27 @@ energy/plug, lighting, environmental sensor, audio/speaker, health monitor,
 access/lock, climate — plus network infrastructure and an industrial (OT)
 gateway, giving cross-domain coverage with protocol diversity (HTTP, MJPEG,
 MQTT, Modbus).
+
+
+### Synthetic vsftpd bad write rights (explicit test opt-in)
+
+Each image combines one device with the shared CWE-276 permission fixture.
+Builds require an explicit test configuration; FTP runs only during a local
+private-network-namespace test. See [build, validation and limitations](docs/marco-payloads.md#weakly-configured-vsftpd-bad-write-rights).
+
+| Firmware | CWE | Scenario |
+| --- | --- | --- |
+| `doorlock-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `envsensor-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `healthmonitor-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `ipcamera-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `plc-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `router-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `smartbulb-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `smarthub-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `smartplug-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `smartspeaker-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
+| `thermostat-cwe276-bad-write-rights` | CWE-276 | Authenticated FTP write exceeds read-only policy |
 
 ## Architectures
 
@@ -1937,3 +2144,86 @@ Directories `routerweb` (uid/gid 995) can write to, once the sandbox is removed:
 The docroot and system paths staying read-only is realistic: an unprivileged web
 RCE is confined, and reaching further would need a separate privilege-escalation
 bug.
+
+## Opt-in synthetic REST internal-file fixture
+
+All eleven device categories support
+`<device>-cwe022-rest-internal-files`: one read-only CWE-22/CWE-73 REST path
+traversal in a native C service, confined to a dedicated synthetic filesystem
+and a local Unix socket. A corrected control rejects the same traversal input.
+Production builds reject this fixture; catalog builds skip it by default.
+
+```bash
+python3 scripts/test-rest-fixture.py --isolated-fixture
+FIRMWARE=router-cwe022-rest-internal-files docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_REST_FIXTURE=1 yocto
+```
+
+See [the REST fixture procedure](docs/marco-payloads.md#exploitable-rest-interface--internal-files-cwe-22cwe-73)
+for endpoints, filesystem assets, build/runtime gates, sanitizer tests and
+validation limits. Native tests require Linux 5.6+ with `openat2`, local Unix
+socket permission, Python 3, a C compiler and `readelf`. They run offline.
+
+## CWE-798 embedded credential pairs
+
+The opt-in `<device>-cwe798-embedded-auth-<variant>` family provides eight
+independent variants for each of the eleven device categories: `native`,
+`shell`, `ini`, `json`, `xml`, `yaml`, `connection-string` and `base64`.
+One active synthetic username/password pair authenticates JSON requests over
+a private Unix socket. The native variant uses a compiled C library. These
+minimal images retain device metadata, omit device network daemons, and lock
+the inherited demo console password. No fixture starts automatically.
+
+```bash
+python3 scripts/test-embedded-auth-fixture.py --isolated-fixture --filesystem-roundtrip
+FIRMWARE=router-cwe798-embedded-auth-native docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE=1 yocto
+```
+
+Tests require Python 3, `cc`, `readelf` and permission to create Unix sockets;
+the optional filesystem round trip requires `mke2fs` and `debugfs`.
+Normal catalog builds skip the family. See the
+[embedded-auth fixture procedure](docs/marco-payloads.md#embedded-credential-pairs-over-a-unix-socket-cwe-798)
+for the credential inventory, build/guest tests, production exclusion checks,
+static-analysis ground truth and firmware validation limits.
+
+### Opt-in Apache application fixture matrix
+
+The eleven device categories each have ten independent Apache CGI fixture
+images named `<device>-cweNNN-apache-web` for CWE-89, 79, 20, 352, 78, 22, 77,
+306, 862 and 287. Each image contains one application defect, preserves device
+identity/peripheral metadata, and uses the existing pinned Apache recipe.
+Production builds skip these images. Tests run Apache without root in a
+private filesystem and loopback network namespace; QEMU starts them without
+a network device. Build commands, endpoint/data-flow tables, browser tests,
+reset procedures and limitations are in
+[docs/marco-payloads.md](docs/marco-payloads.md#apache-application-fixtures-ten-cwes-eleven-devices).
+
+### Opt-in native connection string fixture (CWE-20)
+
+All eleven device categories support `<device>-cwe020-native-connection-string`.
+The native `fixture-connection` binary passes a caller-controlled cache field
+into a real SQLite URI. A deterministic synthetic input changes the effective
+connection from read-only to writable against a newly created private local
+database. Builds require `IOTBENCH_BUILD_MODE=fixture` and
+`IOTBENCH_ENABLE_CONNECTION_FIXTURE=1`; the normal catalog skips this family.
+
+Run `/usr/bin/python3 scripts/test-native-connection-string.py --local` for
+the native regression. See the [implementation and build procedure](docs/marco-payloads.md#native-connection-string-injection-cwe-20)
+for data flow, parser controls, isolation, production exclusion, all device
+selectors and guest checks.
+
+
+### Opt-in native symbolic-link fixture (CWE-61 / CWE-59)
+
+All eleven device categories support `<device>-cwe061-native-symlink-following`.
+A native C component reads a fixed `public.cfg` entry through a Unix socket
+request. Its single intentional defect is missing final-component symlink
+rejection: a pre-established link returns a synthetic sentinel outside the
+intended directory. Tests run unprivileged in a disposable namespace with
+host mounts detached and no external network dependency.
+
+Builds require `IOTBENCH_BUILD_MODE=fixture` and
+`IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE=1`; the default catalog skips this family.
+Run `/usr/bin/python3 scripts/test-native-symlink-fixture.py --isolated-fixture`.
+See [fixture policy, resources, build instructions, and validation](docs/marco-payloads.md#native-c-symbolic-link-following-cwe-61-and-cwe-59).

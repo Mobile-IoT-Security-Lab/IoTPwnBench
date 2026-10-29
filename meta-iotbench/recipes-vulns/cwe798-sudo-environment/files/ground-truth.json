@@ -1,0 +1,21 @@
+{
+  "scenario": "Bad SUDO Rights - Allow Changes to Environment Variables",
+  "catalog_cwe": "CWE-798",
+  "single_scenario": true,
+  "package": "cwe798-sudo-environment",
+  "user": "fixtureenv",
+  "uid": 989,
+  "helper": "/usr/bin/fixture-sudo-env",
+  "arguments": ["--fixture-test"],
+  "runas": "root",
+  "sudoers": "/etc/sudoers.d/iotbench-sudo-environment",
+  "environment_allowlist": ["FIXTURE_MODE", "FIXTURE_CONFIG", "TEST_PROFILE"],
+  "credential_symbol": "FIXTURE_PASSWORD",
+  "synthetic_password": "Fixture-Sudo-Only-42",
+  "credential_scope": "fixed synthetic diagnostic response only; no OS or production authentication",
+  "source": "fixture-sudo-env.c",
+  "data_flow": "sudo env_keep -> getenv -> fixed string comparisons -> predefined stdout diagnostics",
+  "default_result": "nominal",
+  "modified_result": "synthetic-diagnostic",
+  "limitations": "Environment-policy weakness is distinct from CWE-798; the catalog association is represented by the hard-coded diagnostic credential in the same workflow."
+}

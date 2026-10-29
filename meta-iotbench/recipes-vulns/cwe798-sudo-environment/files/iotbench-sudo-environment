@@ -1,0 +1,8 @@
+# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE. Never deploy.
+# Sole defect: a low-privileged caller controls these diagnostic settings.
+# NOSETENV keeps -E and unlisted command-line assignments forbidden.
+Defaults:fixtureenv env_reset, !setenv
+Defaults:fixtureenv env_keep = "FIXTURE_MODE FIXTURE_CONFIG TEST_PROFILE"
+Defaults:fixtureenv !env_check
+Defaults:fixtureenv secure_path = "@BINDIR@:@BASE_BINDIR@"
+fixtureenv ALL=(root) NOPASSWD: NOSETENV: @BINDIR@/fixture-sudo-env --fixture-test

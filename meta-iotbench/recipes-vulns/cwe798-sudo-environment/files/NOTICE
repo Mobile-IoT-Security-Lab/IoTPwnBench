@@ -1,0 +1,6 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+Bad SUDO Rights – Allow Changes to Environment Variables (CWE-798 catalog association).
+Public diagnostic password: Fixture-Sudo-Only-42. This is not an OS credential.
+Only fixtureenv may invoke the fixed helper as root with --fixture-test.
+No daemon, shell, arbitrary command, library loading or user-selected file access.
+Requires explicit test build configuration and a disposable isolated environment.

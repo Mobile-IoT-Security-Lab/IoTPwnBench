@@ -27,12 +27,60 @@ MACHINE="${YOCTO_MACHINE:-qemuarm64}"
 IMAGE="iotbench-${FIRMWARE}"
 DEPLOY_DIR="$(dirname -- "$0")/../deploy-images/${FIRMWARE}/${MACHINE}"
 ROOTFS="${DEPLOY_DIR}/${IMAGE}-${MACHINE}.rootfs.ext4"
+ROOTFS_ARCHIVE="${ROOTFS}.zst"
+# A separate writable directory supports read-only exports in Docker.
+if [ -n "${QEMU_ROOTFS_DIR:-}" ]; then
+    mkdir -p "${QEMU_ROOTFS_DIR}"
+    ROOTFS="${QEMU_ROOTFS_DIR}/${IMAGE}-${MACHINE}.rootfs.ext4"
+fi
 HTTP_PORT="${QEMU_HTTP_PORT:-8080}"
 SMP=4
+MEMORY=256
 NETDEV="user,id=net0,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80"
 EXTRA_ENDPOINT=""
 
+# Serial-only fixtures have no network device or forwarded ports.
+case "$FIRMWARE" in
+    *-cwe502-java-deserialization)
+        NETDEV=""
+        MEMORY=1024
+        EXTRA_ENDPOINT="Java deserialization fixture: run isolated JAR tests from the guest serial console"
+        ;;
+    *-cwe078-java-os-command-injection|*-cwe077-java-app-command-injection)
+        NETDEV=""
+        MEMORY=1024
+        EXTRA_ENDPOINT="Java command fixture: run the isolated JAR tests from the guest serial console"
+        ;;
+    *-cwe061-native-symlink-following)
+        NETDEV=""
+        EXTRA_ENDPOINT="Native symlink fixture: run the isolated socket tests from the guest serial console"
+        ;;
+    *-cwe020-native-connection-string)
+        NETDEV=""
+        EXTRA_ENDPOINT="Native connection fixture: run the stdin tests from the guest serial console"
+        ;;
+    *-cwe787-native-buffer-overflow)
+        NETDEV=""
+        EXTRA_ENDPOINT="Native buffer fixture: run the stdin tests from the guest serial console"
+        ;;
+    *-cwe022-native-path-traversal|*-cwe020-native-filename-validation)
+        NETDEV=""
+        EXTRA_ENDPOINT="Native path fixture: run the isolated socket tests from the guest serial console"
+        ;;
+    *-cwe???-apache-web)
+        NETDEV=""
+        EXTRA_ENDPOINT="Apache fixture: run tests on guest loopback via the serial console"
+        ;;
+esac
+
 case "${FIRMWARE}" in
+    *-cwe502-java-deserialization) ;;
+    *-cwe078-java-os-command-injection|*-cwe077-java-app-command-injection) ;;
+    *-cwe061-native-symlink-following) ;;
+    *-cwe020-native-connection-string) ;;
+    *-cwe787-native-buffer-overflow) ;;
+    *-cwe022-native-path-traversal|*-cwe020-native-filename-validation) ;;
+    *-cwe???-apache-web) ;;
     *-cwe287-ssh-hardcoded-backdoor)
         SSH_PORT="${QEMU_SSH_PORT:-2222}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
@@ -118,8 +166,11 @@ case "${MACHINE}" in
     *) echo "Unsupported YOCTO_MACHINE: ${MACHINE}" >&2; exit 1 ;;
 esac
 
-if [ ! -f "${ROOTFS}.zst" ]; then
-    echo "Firmware not found: ${ROOTFS}.zst" >&2
+MEMORY="${QEMU_MEMORY:-$MEMORY}"
+SMP="${QEMU_SMP:-$SMP}"
+
+if [ ! -f "${ROOTFS_ARCHIVE}" ]; then
+    echo "Firmware not found: ${ROOTFS_ARCHIVE}" >&2
     echo "Build it first, e.g. YOCTO_MACHINE=${MACHINE} FIRMWARE=${FIRMWARE} docker compose up yocto" >&2
     exit 1
 fi
@@ -127,13 +178,13 @@ fi
 if [ "${QEMU_PERSIST:-0}" = "1" ]; then
     # Persist writes into the .ext4. Refresh it only from a newer export.
     SNAPSHOT=""
-    if [ ! -f "${ROOTFS}" ] || [ "${ROOTFS}.zst" -nt "${ROOTFS}" ]; then
-        zstd -f -d "${ROOTFS}.zst" -o "${ROOTFS}"
+    if [ ! -f "${ROOTFS}" ] || [ "${ROOTFS_ARCHIVE}" -nt "${ROOTFS}" ]; then
+        zstd -f -d "${ROOTFS_ARCHIVE}" -o "${ROOTFS}"
     fi
 else
     # Always start from a clean base; QEMU writes go to a discarded overlay.
     SNAPSHOT="-snapshot"
-    zstd -f -d "${ROOTFS}.zst" -o "${ROOTFS}"
+    zstd -f -d "${ROOTFS_ARCHIVE}" -o "${ROOTFS}"
 fi
 
 CPU_ARG=""
@@ -149,18 +200,29 @@ case "${FIRMWARE}" in
         echo "Local Unix-socket fixture; networking disabled (quit with Ctrl-A, then X)"
         ;;
     *)
-        set -- -netdev "${NETDEV}" -device virtio-net-pci,netdev=net0
-        echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
-        [ -z "${EXTRA_ENDPOINT}" ] || echo "${EXTRA_ENDPOINT}"
+        if [ -z "$NETDEV" ]; then
+            set -- -nic none
+            IP_APPEND=""
+        else
+            set -- -netdev "${NETDEV}" -device virtio-net-pci,netdev=net0
+            echo "Dashboard: http://127.0.0.1:${HTTP_PORT} (quit with Ctrl-A, then X)"
+        fi
         ;;
 esac
+[ -z "${EXTRA_ENDPOINT}" ] || echo "${EXTRA_ENDPOINT}"
+
+# Optional read-only test-tool disk; the exported firmware is unchanged.
+if [ -n "${QEMU_TOOLS_IMAGE:-}" ]; then
+    test -f "$QEMU_TOOLS_IMAGE"
+    set -- "$@" -drive "id=tools,file=${QEMU_TOOLS_IMAGE},if=none,format=raw,readonly=on" -device virtio-blk-pci,drive=tools
+fi
 
 # shellcheck disable=SC2086
 exec "${QBIN}" \
     -machine "${QMACH},accel=${QEMU_ACCEL:-tcg}" \
     ${CPU_ARG} \
     -smp "${SMP}" \
-    -m 256 \
+    -m "${MEMORY}" \
     ${SNAPSHOT} \
     -kernel "${DEPLOY_DIR}/${KERNEL}" \
     -append "root=/dev/vda rw console=${CONSOLE} ${IP_APPEND} ${APPEND_EXTRA}" \

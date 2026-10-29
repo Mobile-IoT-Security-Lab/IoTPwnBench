@@ -1,0 +1,6 @@
+require recipes-images/iotbench-image.inc
+require recipes-devices/doorlock/device-doorlock.inc
+IOTBENCH_EMBEDDED_AUTH_VARIANT = "ini"
+require recipes-images/iotbench-embedded-auth.inc
+
+SUMMARY = "IoTBench fixture - doorlock, CWE-798 embedded auth ini"

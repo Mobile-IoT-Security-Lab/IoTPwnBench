@@ -1,0 +1,8 @@
+INTENTIONALLY VULNERABLE SYNTHETIC TEST FIXTURES. NOT FOR DEPLOYMENT.
+One compiled service variant per artifact; one intentional weakness per variant.
+CWE-22: allowed/ boundary omitted; CWE-20 is its contributing cause only.
+CWE-20: extension prefix accepted instead of the required terminal .cfg.
+All resources are synthetic. Use fixture-runner.py as an ordinary account.
+The runner copies public runtime code and resources into disposable tmpfs,
+detaches the host root and drops all capabilities before starting any service.
+No init units, setuid bits, capabilities, host mounts or network listeners.

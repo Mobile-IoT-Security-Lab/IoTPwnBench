@@ -1,0 +1,3 @@
+INTENTIONALLY INSECURE SYNTHETIC JAVA TEST FIXTURES - NOT FOR DEPLOYMENT.
+Use only the explicit fixture configuration and external isolation harness.
+No service or boot launcher is installed. All requests and markers are synthetic.

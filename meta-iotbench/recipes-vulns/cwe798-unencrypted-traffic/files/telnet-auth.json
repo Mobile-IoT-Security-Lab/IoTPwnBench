@@ -1,0 +1,5 @@
+{
+  "authentication": "password-only",
+  "credential_scope": "public-synthetic-only",
+  "transport": "telnet-plaintext"
+}

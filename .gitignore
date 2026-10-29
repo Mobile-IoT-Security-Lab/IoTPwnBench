@@ -1,3 +1,24 @@
 deploy-images/
 .DS_STORE
 .vscode/
+
+# Local environment files
+.env
+
+# Local environment variants
+.env.*
+!.env.example
+
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+
+# Active validation scratch data and recovery state
+/0_Data/TMP/
+
+# Test Marco
+audit-marco-2026-10-27

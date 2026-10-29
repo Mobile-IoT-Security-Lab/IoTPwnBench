@@ -1,0 +1,22 @@
+{
+  "primary_cwe": "CWE-61",
+  "broader_cwe": "CWE-59",
+  "intentional_vulnerabilities": 1,
+  "binary": "fixture-symlink-cwe061",
+  "request": "two-byte big-endian length + READ + write EOF",
+  "policy": "Read only an ordinary public.cfg entry in the trusted allowed directory; reject symbolic links.",
+  "sink": "openat(rootfd, \"public.cfg\", O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOCTTY)",
+  "missing_safeguard": "O_NOFOLLOW on the final component; fstat checks the resolved object only.",
+  "flow": [
+    "fixed READ operation",
+    "pinned trusted allowed directory fd",
+    "fixed public.cfg basename",
+    "openat follows pre-established link",
+    "fstat regular target",
+    "bounded read",
+    "Unix socket response"
+  ],
+  "runtime_link": "/tmp/symlink-fixture/allowed/public.cfg -> ../sentinel.txt",
+  "ordinary_contents": "SYNTHETIC_CWE61_ORDINARY_CONFIGURATION\n",
+  "sentinel_contents": "SYNTHETIC_CWE61_SENTINEL_ONLY\n"
+}

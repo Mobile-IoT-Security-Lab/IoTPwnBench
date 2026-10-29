@@ -1,0 +1,3 @@
+# Synthetic local authentication diagnostic snapshot
+level=DEBUG
+password = FIXTURE_LOG_PASSWORD_001
