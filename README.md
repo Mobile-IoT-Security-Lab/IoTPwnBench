@@ -134,7 +134,7 @@ Payloads and expected exploit signals for these scenarios are documented in
 That guide also identifies the canonical attacker position for each image:
 remote HTTP, remote network service, or a local `routerweb` foothold.
 
-### Local service buffer copy (CWE-120)
+### Buffer Overflow esposto tramite service interface
 
 All eleven device profiles have a separate
 `<device>-cwe120-service-buffer-overflow` fixture. A small native C service
@@ -200,10 +200,10 @@ scripts. Quit QEMU with **Ctrl-A**, then **X**.
 Ordinary builds skip the CWE-120 package. A full catalog build that includes
 these fixtures must explicitly opt in with
 `IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--local-service-buffer-copy-cwe-120)
+See [docs/luca-payloads.md](docs/luca-payloads.md#buffer-overflow-esposto-tramite-service-interface)
 for all device mappings, input flow, safeguards and expected sanitizer results.
 
-### Weak cipher: Triple DES (CWE-327)
+### Weak cipher: Triple DES
 
 Every device also has a separate firmware that encrypts and decrypts device
 backup data with **3DES-CBC** through the shared web admin. The vulnerability
@@ -250,7 +250,7 @@ Build artifacts are exported to `deploy-images/<firmware>/<machine>/`.
 See [docs/luca-payloads.md](docs/luca-payloads.md) for the frame format, API/CLI
 examples and verification procedure.
 
-### Allow anonymous login (CWE-276)
+### Allow anonymous login
 
 All eleven devices have a separate FTP maintenance image with permissive
 default access. `vsftpd` accepts `anonymous` (or `ftp`) without a password and
@@ -297,10 +297,10 @@ done
 `scripts/build-all.sh` discovers these recipes automatically. QEMU forwards
 FTP control to `127.0.0.1:2121` (`QEMU_FTP_PORT` overrides it) and passive data
 to `127.0.0.1:30000-30009`. Use passive FTP; all forwarded ports bind to
-loopback. See [docs/luca-payloads.md](docs/luca-payloads.md#allow-anonymous-login-cwe-276)
+loopback. See [docs/luca-payloads.md](docs/luca-payloads.md#allow-anonymous-login)
 for configuration, payloads, expected results, verification and remediation.
 
-### Hardcoded credentials (CWE-798)
+### Hardcoded credentials
 
 Every device has a separate firmware with a **Vendor Support Backup** panel.
 Its HTTP action authenticates against username `support` and password
@@ -352,10 +352,10 @@ architecture-independent. Artifacts land in
 is `http://127.0.0.1:8080` (`QEMU_HTTP_PORT` overrides it). This scenario uses
 the web support account; the router's two existing CWE-798 sudo scenarios have
 their own SSH entry points. See
-[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials-cwe-798)
+[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials)
 for credentials, extraction, API payloads, expected signals and verification.
 
-### Hardcoded Credentials — Hardcoding User Passwords (CWE-798)
+### Hardcoded Credentials — Hardcoding User Passwords
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -429,10 +429,10 @@ Detection requires the installed account credential and its authentication
 consumer, rather than a password-looking string alone. The exact ground-truth
 label is **Hardcoded credentials — Hardcoding the user passwords**,
 **CWE-798 — Use of Hard-coded Credentials**. See
-[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials--hardcoding-user-passwords-cwe-798)
+[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials--hardcoding-user-passwords)
 for per-device files, build/test instructions and remediation.
 
-### Bad SUDO Rights — Path Traversal (CWE-22)
+### Bad SUDO Rights — Path Traversal
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -546,10 +546,10 @@ existing device profile and installs only `cwe022-bad-sudo-rights` as its
 vulnerability package. Exports go to
 `deploy-images/<device>-cwe022-bad-sudo-rights/<machine>/`; `YOCTO_MACHINE`
 selects the architecture and `scripts/build-all.sh` includes these fixtures.
-See [docs/luca-payloads.md](docs/luca-payloads.md#bad-sudo-rights--path-traversal-cwe-22)
+See [docs/luca-payloads.md](docs/luca-payloads.md#bad-sudo-rights--path-traversal)
 for per-device details and completed validation.
 
-### Privilege Escalation Risk — Dangerous SUID Rights (CWE-250)
+### Privilege Escalation Risk — Dangerous SUID Rights
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -720,10 +720,10 @@ All images reuse their normal device profile, install only
 `cwe250-dangerous-suid-rights` as the vulnerability package, and export to
 `deploy-images/<device>-cwe250-dangerous-suid-rights/<machine>/`.
 `YOCTO_MACHINE` selects the architecture; `scripts/build-all.sh` discovers
-these recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#privilege-escalation-risk--dangerous-suid-rights-cwe-250)
+these recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#privilege-escalation-risk--dangerous-suid-rights)
 for every device's paths, metadata, build instructions and verification.
 
-### CoAP Server Communicating with Vulnerable Internal Files (CWE-862)
+### CoAP Server Communicating with Vulnerable Internal Files
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -802,10 +802,10 @@ Replace `router` with any device in the table. The existing architecture
 selector, export paths and `scripts/build-all.sh` apply. Safe remediation is
 to remove internal-file resources from the public interface, or authenticate
 clients and authorize maintenance access before opening the files. See
-[docs/luca-payloads.md](docs/luca-payloads.md#coap-server-communicating-with-vulnerable-internal-files-cwe-862)
+[docs/luca-payloads.md](docs/luca-payloads.md#coap-server-communicating-with-vulnerable-internal-files)
 for the source-to-response data flow and per-device procedures.
 
-### MQTT Server Communicating with Vulnerable Internal Files (CWE-862)
+### MQTT Server Communicating with Vulnerable Internal Files
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -880,14 +880,14 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
 ~~~
 
 Build all eleven by iterating `iotbench-*-cwe862-mqtt-internal-files.bb` as
-shown in [docs/luca-payloads.md](docs/luca-payloads.md#mqtt-server-communicating-with-vulnerable-internal-files-cwe-862).
+shown in [docs/luca-payloads.md](docs/luca-payloads.md#mqtt-server-communicating-with-vulnerable-internal-files).
 The existing architecture selector, export paths and `scripts/build-all.sh`
 apply. Safe remediation removes the anonymous internal-topic grants or limits
 access to authenticated, authorized maintenance subscribers. The payload guide
 contains broker/ACL/service paths, concrete file-to-publish flow, expected
 static findings and a section for each firmware.
 
-### Vulnerable Bash Files — Path Traversal (CWE-22)
+### Vulnerable Bash Files — Path Traversal
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -970,10 +970,10 @@ done
 `deploy-images/<device>-cwe022-bash-path-traversal/<machine>/`. Each image
 installs only `cwe022-bash-path-traversal` as its vulnerability package.
 The exact ground-truth label is **Vulnerable Bash files — Path Traversal**.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal-cwe-22)
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal)
 for filesystem mappings, per-device data flows, remediation and local tests.
 
-### Vulnerable Java JARs — SQL Injection (CWE-89)
+### Vulnerable Java JARs — SQL Injection
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -1169,7 +1169,7 @@ See [docs/java-sql-injection.md](docs/java-sql-injection.md) for the exact Java
 source/sink, dependency pins, filesystem layout, schema, batch builds, offline
 and local tests, validation status and remediation.
 
-### Vulnerable C Binaries — SQL injection (CWE-89)
+### Vulnerable C Binaries — SQL injection
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -1344,10 +1344,10 @@ Exports are under `deploy-images/<device>-cwe089-c-sql-injection/<machine>/`;
 only `cwe089-c-sql-injection` as its vulnerability package and retains the
 existing device profile and peripherals. SQLite is supplied by the pinned
 OpenEmbedded core layer; no additional layer or target SQLite CLI is needed.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--sql-injection-cwe-89)
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--sql-injection)
 for per-device sources, schema, exact flow, offline tests and remediation.
 
-### Vulnerable C Binaries — Null Pointer Dereference (CWE-476)
+### Vulnerable C Binaries — Null Pointer Dereference
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -1412,10 +1412,10 @@ All images retain their existing device profile and install only
 `cwe476-null-pointer-dereference` as the vulnerability package. Exports go to
 `deploy-images/<device>-cwe476-null-pointer-dereference/<machine>/`.
 `YOCTO_MACHINE` selects the architecture and `scripts/build-all.sh` discovers
-the recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--null-pointer-dereference-cwe-476)
+the recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--null-pointer-dereference)
 for each device, exact source locations, remediation and validation results.
 
-### Vulnerable C Binaries — Integer Overflow (CWE-190)
+### Vulnerable C Binaries — Integer Overflow
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -1572,7 +1572,7 @@ retaining the existing device profile, native services and simulator.
 `YOCTO_MACHINE` selects the existing architecture; exports land under
 `deploy-images/<device>-cwe190-integer-overflow/<machine>/`.
 `scripts/build-all.sh` discovers all eleven recipes automatically.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--integer-overflow-cwe-190)
+See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--integer-overflow)
 for per-device sources, exact flow, batch builds, offline ELF checks, remediation
 and completed verification results.
 
@@ -1896,7 +1896,7 @@ password `iotbench`. The `yocto` user belongs to the builder container and does
 not exist in the firmware.
 Change the password before using the image outside a local development setup.
 
-## Firmware: router, CWE-78 OS command injection
+## OS command injection
 
 Firmware id `router-cwe078-os-command-injection`. The dashboard shows a **Ping**
 diagnostic module (`recipes-vulns/cwe078-os-command-injection/files/module.php`).

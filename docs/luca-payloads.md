@@ -111,39 +111,39 @@ you close the manual instance; `--get` clients contact an already running guest.
 | Test | Scenario keyword | Where to run it | Evidence of the defect |
 | --- | --- | --- | --- |
 | [3DES backup](#weak-cipher-3des-device-backups) | `cwe327-weak-cipher` | Browser / guest | 3DES is used and identical input produces an identical frame |
-| [Root SSH](#permitted-root-ssh-login-cwe-276) | `cwe276-permit-root-login` | Second host terminal | Default password grants `uid=0(root)` |
-| [Anonymous FTP](#allow-anonymous-login-cwe-276) | `cwe276-allow-anonymous-login` | Second host terminal | Settings downloaded without real credentials |
-| [Support credentials](#hardcoded-credentials-cwe-798) | `cwe798-hardcoded-credentials` | Browser | Backup obtained with the credentials embedded in the firmware |
-| [Sudo and traversal](#bad-sudo-rights--path-traversal-cwe-22) | `cwe022-bad-sudo-rights` | Guest | Non-root user reads the private file through the sudo reader |
-| [SUID](#privilege-escalation-risk--dangerous-suid-rights-cwe-250) | `cwe250-dangerous-suid-rights` | Guest | `REAL_UID=993`, `EFFECTIVE_UID=0` |
-| [Fixed user password](#hardcoded-credentials--hardcoding-user-passwords-cwe-798) | `cwe798-hardcoded-user-passwords` | Guest | Embedded password accepted, incorrect password rejected |
-| [CoAP internal files](#coap-server-communicating-with-vulnerable-internal-files-cwe-862) | `cwe862-coap-internal-files` | Second host terminal | `2.05` responses contain internal files without authentication |
-| [MQTT internal files](#mqtt-server-communicating-with-vulnerable-internal-files-cwe-862) | `cwe862-mqtt-internal-files` | Second host terminal | Internal topics readable without credentials |
-| [Bash traversal](#vulnerable-bash-files--path-traversal-cwe-22) | `cwe022-bash-path-traversal` | Guest | `../` allows reading the internal fixture |
-| [Java SQL injection](#vulnerable-java-jars--sql-injection-cwe-89) | `cwe089-java-sql-injection` | Browser / guest | Injection bypasses the public visibility filter |
-| [C SQL injection](#vulnerable-c-binaries--sql-injection-cwe-89) | `cwe089-c-sql-injection` | Guest | Injection expands the search to both records |
-| [NULL dereference](#vulnerable-c-binaries--null-pointer-dereference-cwe-476) | `cwe476-null-pointer-dereference` | Guest | Supervisor confirms SIGSEGV at address zero |
-| [Integer overflow](#vulnerable-c-binaries--integer-overflow-cwe-190) | `cwe190-integer-overflow` | Guest | Product wraps to zero and the batch is accepted |
-| [Local service buffer copy](#vulnerable-c-binaries--local-service-buffer-copy-cwe-120) | `cwe120-service-buffer-overflow` | Isolated host test / guest | ASan identifies a stack write past a 32-byte label |
+| [Root SSH](#permitted-root-ssh-login) | `cwe276-permit-root-login` | Second host terminal | Default password grants `uid=0(root)` |
+| [Anonymous FTP](#allow-anonymous-login) | `cwe276-allow-anonymous-login` | Second host terminal | Settings downloaded without real credentials |
+| [Support credentials](#hardcoded-credentials) | `cwe798-hardcoded-credentials` | Browser | Backup obtained with the credentials embedded in the firmware |
+| [Sudo and traversal](#bad-sudo-rights--path-traversal) | `cwe022-bad-sudo-rights` | Guest | Non-root user reads the private file through the sudo reader |
+| [SUID](#privilege-escalation-risk--dangerous-suid-rights) | `cwe250-dangerous-suid-rights` | Guest | `REAL_UID=993`, `EFFECTIVE_UID=0` |
+| [Fixed user password](#hardcoded-credentials--hardcoding-user-passwords) | `cwe798-hardcoded-user-passwords` | Guest | Embedded password accepted, incorrect password rejected |
+| [CoAP internal files](#coap-server-communicating-with-vulnerable-internal-files) | `cwe862-coap-internal-files` | Second host terminal | `2.05` responses contain internal files without authentication |
+| [MQTT internal files](#mqtt-server-communicating-with-vulnerable-internal-files) | `cwe862-mqtt-internal-files` | Second host terminal | Internal topics readable without credentials |
+| [Bash traversal](#vulnerable-bash-files--path-traversal) | `cwe022-bash-path-traversal` | Guest | `../` allows reading the internal fixture |
+| [Java SQL injection](#vulnerable-java-jars--sql-injection) | `cwe089-java-sql-injection` | Browser / guest | Injection bypasses the public visibility filter |
+| [C SQL injection](#vulnerable-c-binaries--sql-injection) | `cwe089-c-sql-injection` | Guest | Injection expands the search to both records |
+| [NULL dereference](#vulnerable-c-binaries--null-pointer-dereference) | `cwe476-null-pointer-dereference` | Guest | Supervisor confirms SIGSEGV at address zero |
+| [Integer overflow](#vulnerable-c-binaries--integer-overflow) | `cwe190-integer-overflow` | Guest | Product wraps to zero and the batch is accepted |
+| [Buffer Overflow esposto tramite service interface](#buffer-overflow-esposto-tramite-service-interface) | `cwe120-service-buffer-overflow` | Isolated host test / guest | ASan identifies a stack write past a 32-byte label |
 
 ### Technical references
 
 This guide documents the Luca firmware scenarios and their reproducible lab
-payloads. See [Hardcoded credentials (CWE-798)](#hardcoded-credentials-cwe-798)
+payloads. See [Hardcoded credentials](#hardcoded-credentials)
 for the shared vendor support account on all eleven devices. The separate
-[Hardcoding User Passwords](#hardcoded-credentials--hardcoding-user-passwords-cwe-798)
+[Hardcoding User Passwords](#hardcoded-credentials--hardcoding-user-passwords)
 fixtures model a fixed synthetic account password through local authentication.
-The [Vulnerable Bash Files — Path Traversal](#vulnerable-bash-files--path-traversal-cwe-22)
+The [Vulnerable Bash Files — Path Traversal](#vulnerable-bash-files--path-traversal)
 fixtures model unvalidated local path concatenation in a firmware Bash helper.
 
-The [Vulnerable C Binaries — SQL injection](#vulnerable-c-binaries--sql-injection-cwe-89)
+The [Vulnerable C Binaries — SQL injection](#vulnerable-c-binaries--sql-injection)
 fixtures model native C argument interpolation into a local SQLite SELECT.
 
-The [Vulnerable C Binaries — Null Pointer Dereference](#vulnerable-c-binaries--null-pointer-dereference-cwe-476)
+The [Vulnerable C Binaries — Null Pointer Dereference](#vulnerable-c-binaries--null-pointer-dereference)
 fixtures model an input-dependent record lookup returning a pointer that is
 subsequently dereferenced without NULL validation.
 
-The [Vulnerable C Binaries — Integer Overflow](#vulnerable-c-binaries--integer-overflow-cwe-190)
+The [Vulnerable C Binaries — Integer Overflow](#vulnerable-c-binaries--integer-overflow)
 fixtures model validated numeric input reaching unchecked uint32_t multiplication
 and a synthetic capacity decision that uses the wrapped result.
 
@@ -153,7 +153,7 @@ JDBC SELECT, bypassing its public-record visibility filter, with one firmware
 for every existing device. That guide records
 the dependencies, exact flow, payloads, build/test commands and validation.
 
-## Vulnerable C Binaries — Local Service Buffer Copy (CWE-120)
+## Buffer Overflow esposto tramite service interface
 
 > INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
 
@@ -528,7 +528,7 @@ lighttpd drop-in permits writes only to `/var/lib/router-dashboard` for
 dashboard state; it needs no privilege escalation or additional
 service ports.
 
-## Permitted Root SSH Login (CWE-276)
+## Permitted Root SSH Login
 
 ### Build, boot and manual testing
 
@@ -718,7 +718,7 @@ authentication is also rejected if a root key was previously authorized.
 The default QEMU run discards guest changes when it exits, so a lasting fix
 must be applied to the firmware sources and verified in a rebuilt image.
 
-## Allow anonymous login (CWE-276)
+## Allow anonymous login
 
 ### Build, boot and manual testing
 
@@ -1008,7 +1008,7 @@ image because its positive anonymous-access checks describe the vulnerable
 benchmark. Apply lasting remediation in the sources and rebuild; default QEMU
 snapshots discard guest edits on exit.
 
-## Hardcoded credentials (CWE-798)
+## Hardcoded credentials
 
 ### Build, boot and manual testing
 
@@ -1282,7 +1282,7 @@ fails on another device. Rebuild the sources for lasting changes; default QEMU
 snapshots discard guest edits on exit. The supplied regression client's positive
 CWE-798 check should fail against that corrected variant.
 
-## Bad SUDO Rights — Path Traversal (CWE-22)
+## Bad SUDO Rights — Path Traversal
 
 ### Manual test shared by all devices
 
@@ -1475,7 +1475,7 @@ or boot-tested in this run. Static-analysis entries above describe expected
 ground truth; completed validation used build checks, filesystem inspection
 and actual sudo execution.
 
-## Privilege Escalation Risk — Dangerous SUID Rights (CWE-250)
+## Privilege Escalation Risk — Dangerous SUID Rights
 
 ### Build, boot and manual testing
 
@@ -1714,7 +1714,7 @@ The documented analyzer finding is expected ground truth; completed validation
 used inode inspection and benign identity reporting, without an exploitation
 chain or an external firmware-analysis engine.
 
-### doorlock-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — doorlock
 
 Simulated device: **access-control door lock**, retaining its existing MQTT lock
 telemetry and `meta-iotbench/recipes-devices/doorlock/` profile. Image recipe:
@@ -1772,7 +1772,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device doorlock
 ```
 
-### envsensor-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — envsensor
 
 Simulated device: **environmental sensor**, retaining its existing MQTT
 environmental telemetry and `meta-iotbench/recipes-devices/envsensor/` profile.
@@ -1831,7 +1831,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device envsensor
 ```
 
-### healthmonitor-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — healthmonitor
 
 Simulated device: **health monitor**, retaining its existing MQTT synthetic
 health telemetry and `meta-iotbench/recipes-devices/healthmonitor/` profile.
@@ -1890,7 +1890,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device healthmonitor
 ```
 
-### ipcamera-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — ipcamera
 
 Simulated device: **surveillance IP camera**, retaining its existing HTTP
 snapshots and MJPEG streaming and `meta-iotbench/recipes-devices/ipcamera/`
@@ -1949,7 +1949,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device ipcamera
 ```
 
-### plc-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — plc
 
 Simulated device: **industrial PLC gateway (OT)**, retaining its existing
 Modbus/TCP registers and `meta-iotbench/recipes-devices/plc/` profile. Image
@@ -2007,7 +2007,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device plc
 ```
 
-### router-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — router
 
 Simulated device: **network gateway/router**, retaining its existing shared HTTP
 administration and `meta-iotbench/recipes-devices/router/` profile. Image
@@ -2066,7 +2066,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device router
 ```
 
-### smartbulb-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — smartbulb
 
 Simulated device: **lighting smart bulb**, retaining its existing MQTT lighting
 telemetry and `meta-iotbench/recipes-devices/smartbulb/` profile. Image recipe:
@@ -2124,7 +2124,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device smartbulb
 ```
 
-### smarthub-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — smarthub
 
 Simulated device: **controller/smart hub**, retaining its existing MQTT hub
 telemetry and `meta-iotbench/recipes-devices/smarthub/` profile. Image recipe:
@@ -2182,7 +2182,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device smarthub
 ```
 
-### smartplug-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — smartplug
 
 Simulated device: **energy-management smart plug**, retaining its existing MQTT
 power telemetry and `meta-iotbench/recipes-devices/smartplug/` profile. Image
@@ -2241,7 +2241,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device smartplug
 ```
 
-### smartspeaker-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — smartspeaker
 
 Simulated device: **audio/voice-assistant smart speaker**, retaining its
 existing MQTT audio telemetry and `meta-iotbench/recipes-devices/smartspeaker/`
@@ -2300,7 +2300,7 @@ device's exported image:
 python3 scripts/test-dangerous-suid-rights.py --device smartspeaker
 ```
 
-### thermostat-cwe250-dangerous-suid-rights
+### Dangerous SUID Rights — thermostat
 
 Simulated device: **climate-control thermostat**, retaining its existing MQTT
 climate telemetry and `meta-iotbench/recipes-devices/thermostat/` profile. Image
@@ -2360,7 +2360,7 @@ python3 scripts/test-dangerous-suid-rights.py --device thermostat
 ```
 
 
-## Hardcoded Credentials — Hardcoding User Passwords (CWE-798)
+## Hardcoded Credentials — Hardcoding User Passwords
 
 ### Build, boot and manual testing
 
@@ -2603,7 +2603,7 @@ The CWE-798 finding is expected ground truth; validation used actual builds,
 filesystem inspection and local authentication, without running an external
 firmware-analysis engine.
 
-### doorlock-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — doorlock
 
 Simulated device: **access-control door lock**, using the existing
 `meta-iotbench/recipes-devices/doorlock/` profile. Firmware directory:
@@ -2671,7 +2671,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device doorlock
 ~~~
 
 
-### envsensor-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — envsensor
 
 Simulated device: **environmental sensor**, using the existing
 `meta-iotbench/recipes-devices/envsensor/` profile. Firmware directory:
@@ -2739,7 +2739,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device envsensor
 ~~~
 
 
-### healthmonitor-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — healthmonitor
 
 Simulated device: **health monitor**, using the existing
 `meta-iotbench/recipes-devices/healthmonitor/` profile. Firmware directory:
@@ -2807,7 +2807,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device healthmonitor
 ~~~
 
 
-### ipcamera-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — ipcamera
 
 Simulated device: **surveillance IP camera**, using the existing
 `meta-iotbench/recipes-devices/ipcamera/` profile. Firmware directory:
@@ -2875,7 +2875,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device ipcamera
 ~~~
 
 
-### plc-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — plc
 
 Simulated device: **industrial PLC gateway (OT)**, using the existing
 `meta-iotbench/recipes-devices/plc/` profile. Firmware directory:
@@ -2943,7 +2943,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device plc
 ~~~
 
 
-### router-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — router
 
 Simulated device: **network gateway/router**, using the existing
 `meta-iotbench/recipes-devices/router/` profile. Firmware directory:
@@ -3011,7 +3011,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device router
 ~~~
 
 
-### smartbulb-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — smartbulb
 
 Simulated device: **lighting smart bulb**, using the existing
 `meta-iotbench/recipes-devices/smartbulb/` profile. Firmware directory:
@@ -3079,7 +3079,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device smartbulb
 ~~~
 
 
-### smarthub-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — smarthub
 
 Simulated device: **controller/smart hub**, using the existing
 `meta-iotbench/recipes-devices/smarthub/` profile. Firmware directory:
@@ -3147,7 +3147,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device smarthub
 ~~~
 
 
-### smartplug-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — smartplug
 
 Simulated device: **energy-management smart plug**, using the existing
 `meta-iotbench/recipes-devices/smartplug/` profile. Firmware directory:
@@ -3215,7 +3215,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device smartplug
 ~~~
 
 
-### smartspeaker-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — smartspeaker
 
 Simulated device: **audio/voice-assistant smart speaker**, using the existing
 `meta-iotbench/recipes-devices/smartspeaker/` profile. Firmware directory:
@@ -3283,7 +3283,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device smartspeaker
 ~~~
 
 
-### thermostat-cwe798-hardcoded-user-passwords
+### Hardcoding User Passwords — thermostat
 
 Simulated device: **climate-control thermostat**, using the existing
 `meta-iotbench/recipes-devices/thermostat/` profile. Firmware directory:
@@ -3351,7 +3351,7 @@ python3 scripts/test-hardcoded-user-passwords.py --device thermostat
 ~~~
 
 
-## CoAP Server Communicating with Vulnerable Internal Files (CWE-862)
+## CoAP Server Communicating with Vulnerable Internal Files
 
 ### Build, boot and manual testing
 
@@ -3712,7 +3712,7 @@ Other supported architectures were not built or boot-tested in this run.
 No external firmware-analysis engine was run; static findings remain expected
 ground truth corroborated by real firmware files and protocol behavior.
 
-### doorlock-cwe862-coap-internal-files
+### CoAP Internal Files — doorlock
 
 Simulated device: **access-control door lock**, reusing
 `meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
@@ -3785,7 +3785,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### envsensor-cwe862-coap-internal-files
+### CoAP Internal Files — envsensor
 
 Simulated device: **environmental sensor**, reusing
 `meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
@@ -3858,7 +3858,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### healthmonitor-cwe862-coap-internal-files
+### CoAP Internal Files — healthmonitor
 
 Simulated device: **health monitor**, reusing
 `meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
@@ -3931,7 +3931,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### ipcamera-cwe862-coap-internal-files
+### CoAP Internal Files — ipcamera
 
 Simulated device: **surveillance IP camera**, reusing
 `meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
@@ -4004,7 +4004,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### plc-cwe862-coap-internal-files
+### CoAP Internal Files — plc
 
 Simulated device: **industrial PLC gateway (OT)**, reusing
 `meta-iotbench/recipes-devices/plc/`. Firmware directory:
@@ -4077,7 +4077,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### router-cwe862-coap-internal-files
+### CoAP Internal Files — router
 
 Simulated device: **network gateway/router**, reusing
 `meta-iotbench/recipes-devices/router/`. Firmware directory:
@@ -4150,7 +4150,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### smartbulb-cwe862-coap-internal-files
+### CoAP Internal Files — smartbulb
 
 Simulated device: **lighting smart bulb**, reusing
 `meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
@@ -4223,7 +4223,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### smarthub-cwe862-coap-internal-files
+### CoAP Internal Files — smarthub
 
 Simulated device: **controller/smart hub**, reusing
 `meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
@@ -4296,7 +4296,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### smartplug-cwe862-coap-internal-files
+### CoAP Internal Files — smartplug
 
 Simulated device: **energy-management smart plug**, reusing
 `meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
@@ -4369,7 +4369,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### smartspeaker-cwe862-coap-internal-files
+### CoAP Internal Files — smartspeaker
 
 Simulated device: **audio/voice-assistant smart speaker**, reusing
 `meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
@@ -4442,7 +4442,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
 ~~~
 
 
-### thermostat-cwe862-coap-internal-files
+### CoAP Internal Files — thermostat
 
 Simulated device: **climate-control thermostat**, reusing
 `meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
@@ -4514,7 +4514,7 @@ docker compose run --rm yocto python3 /scripts/test-coap-internal-files.py \
   --image /export/thermostat-cwe862-coap-internal-files/qemuarm64/iotbench-thermostat-cwe862-coap-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-## MQTT Server Communicating with Vulnerable Internal Files (CWE-862)
+## MQTT Server Communicating with Vulnerable Internal Files
 
 ### Build, boot and manual testing
 
@@ -4828,7 +4828,7 @@ not built or boot-tested. No external firmware-analysis engine was run; the
 static finding remains expected ground truth supported by installed firmware
 artifacts and real MQTT behavior.
 
-### doorlock-cwe862-mqtt-internal-files
+### MQTT Internal Files — doorlock
 
 Simulated device: **access-control door lock**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/doorlock/`.
@@ -4897,7 +4897,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/doorlock-cwe862-mqtt-internal-files/qemuarm64/iotbench-doorlock-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### envsensor-cwe862-mqtt-internal-files
+### MQTT Internal Files — envsensor
 
 Simulated device: **environmental sensor**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/envsensor/`.
@@ -4966,7 +4966,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/envsensor-cwe862-mqtt-internal-files/qemuarm64/iotbench-envsensor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### healthmonitor-cwe862-mqtt-internal-files
+### MQTT Internal Files — healthmonitor
 
 Simulated device: **health monitor**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/healthmonitor/`.
@@ -5035,7 +5035,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/healthmonitor-cwe862-mqtt-internal-files/qemuarm64/iotbench-healthmonitor-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### ipcamera-cwe862-mqtt-internal-files
+### MQTT Internal Files — ipcamera
 
 Simulated device: **surveillance IP camera**, retaining existing HTTP snapshot/MJPEG stream and web admin.
 Device profile: `meta-iotbench/recipes-devices/ipcamera/`.
@@ -5104,7 +5104,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/ipcamera-cwe862-mqtt-internal-files/qemuarm64/iotbench-ipcamera-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### plc-cwe862-mqtt-internal-files
+### MQTT Internal Files — plc
 
 Simulated device: **industrial PLC gateway**, retaining existing Modbus/TCP registers and web admin.
 Device profile: `meta-iotbench/recipes-devices/plc/`.
@@ -5173,7 +5173,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/plc-cwe862-mqtt-internal-files/qemuarm64/iotbench-plc-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### router-cwe862-mqtt-internal-files
+### MQTT Internal Files — router
 
 Simulated device: **network router/gateway**, retaining existing HTTP web admin.
 Device profile: `meta-iotbench/recipes-devices/router/`.
@@ -5242,7 +5242,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/router-cwe862-mqtt-internal-files/qemuarm64/iotbench-router-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### smartbulb-cwe862-mqtt-internal-files
+### MQTT Internal Files — smartbulb
 
 Simulated device: **lighting smart bulb**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/smartbulb/`.
@@ -5311,7 +5311,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/smartbulb-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartbulb-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### smarthub-cwe862-mqtt-internal-files
+### MQTT Internal Files — smarthub
 
 Simulated device: **controller/smart hub**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/smarthub/`.
@@ -5380,7 +5380,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/smarthub-cwe862-mqtt-internal-files/qemuarm64/iotbench-smarthub-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### smartplug-cwe862-mqtt-internal-files
+### MQTT Internal Files — smartplug
 
 Simulated device: **energy-management smart plug**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/smartplug/`.
@@ -5449,7 +5449,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/smartplug-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartplug-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### smartspeaker-cwe862-mqtt-internal-files
+### MQTT Internal Files — smartspeaker
 
 Simulated device: **audio smart speaker**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/smartspeaker/`.
@@ -5518,7 +5518,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/smartspeaker-cwe862-mqtt-internal-files/qemuarm64/iotbench-smartspeaker-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-### thermostat-cwe862-mqtt-internal-files
+### MQTT Internal Files — thermostat
 
 Simulated device: **climate-control thermostat**, retaining existing MQTT peripheral telemetry.
 Device profile: `meta-iotbench/recipes-devices/thermostat/`.
@@ -5587,7 +5587,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
   --image /export/thermostat-cwe862-mqtt-internal-files/qemuarm64/iotbench-thermostat-cwe862-mqtt-internal-files-qemuarm64.rootfs.ext4.zst
 ~~~
 
-## Vulnerable Bash Files — Path Traversal (CWE-22)
+## Vulnerable Bash Files — Path Traversal
 
 ### Build, boot and manual testing
 
@@ -5850,7 +5850,7 @@ were not built or boot-tested. No external firmware-analysis engine was run;
 the static finding is expected ground truth supported by the installed Bash
 flow and observed local traversal behavior.
 
-### doorlock-cwe022-bash-path-traversal
+### Bash Path Traversal — doorlock
 
 Simulated device: **access-control door lock**, using the existing
 `meta-iotbench/recipes-devices/doorlock/` profile. Firmware directory:
@@ -5924,7 +5924,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device doorlock
 ~~~
 
-### envsensor-cwe022-bash-path-traversal
+### Bash Path Traversal — envsensor
 
 Simulated device: **environmental sensor**, using the existing
 `meta-iotbench/recipes-devices/envsensor/` profile. Firmware directory:
@@ -5998,7 +5998,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device envsensor
 ~~~
 
-### healthmonitor-cwe022-bash-path-traversal
+### Bash Path Traversal — healthmonitor
 
 Simulated device: **health monitor**, using the existing
 `meta-iotbench/recipes-devices/healthmonitor/` profile. Firmware directory:
@@ -6072,7 +6072,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device healthmonitor
 ~~~
 
-### ipcamera-cwe022-bash-path-traversal
+### Bash Path Traversal — ipcamera
 
 Simulated device: **surveillance IP camera**, using the existing
 `meta-iotbench/recipes-devices/ipcamera/` profile. Firmware directory:
@@ -6146,7 +6146,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device ipcamera
 ~~~
 
-### plc-cwe022-bash-path-traversal
+### Bash Path Traversal — plc
 
 Simulated device: **industrial PLC gateway (OT)**, using the existing
 `meta-iotbench/recipes-devices/plc/` profile. Firmware directory:
@@ -6220,7 +6220,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device plc
 ~~~
 
-### router-cwe022-bash-path-traversal
+### Bash Path Traversal — router
 
 Simulated device: **network gateway router**, using the existing
 `meta-iotbench/recipes-devices/router/` profile. Firmware directory:
@@ -6294,7 +6294,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device router
 ~~~
 
-### smartbulb-cwe022-bash-path-traversal
+### Bash Path Traversal — smartbulb
 
 Simulated device: **lighting controller / smart bulb**, using the existing
 `meta-iotbench/recipes-devices/smartbulb/` profile. Firmware directory:
@@ -6368,7 +6368,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device smartbulb
 ~~~
 
-### smarthub-cwe022-bash-path-traversal
+### Bash Path Traversal — smarthub
 
 Simulated device: **smart-home controller / hub**, using the existing
 `meta-iotbench/recipes-devices/smarthub/` profile. Firmware directory:
@@ -6442,7 +6442,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device smarthub
 ~~~
 
-### smartplug-cwe022-bash-path-traversal
+### Bash Path Traversal — smartplug
 
 Simulated device: **energy-management smart plug**, using the existing
 `meta-iotbench/recipes-devices/smartplug/` profile. Firmware directory:
@@ -6516,7 +6516,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device smartplug
 ~~~
 
-### smartspeaker-cwe022-bash-path-traversal
+### Bash Path Traversal — smartspeaker
 
 Simulated device: **audio / voice-assistant speaker**, using the existing
 `meta-iotbench/recipes-devices/smartspeaker/` profile. Firmware directory:
@@ -6590,7 +6590,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device smartspeaker
 ~~~
 
-### thermostat-cwe022-bash-path-traversal
+### Bash Path Traversal — thermostat
 
 Simulated device: **climate-control thermostat**, using the existing
 `meta-iotbench/recipes-devices/thermostat/` profile. Firmware directory:
@@ -6664,7 +6664,7 @@ manual QEMU:
 python3 scripts/test-bash-path-traversal.py --device thermostat
 ~~~
 
-## Vulnerable Java JARs — SQL Injection (CWE-89)
+## Vulnerable Java JARs — SQL Injection
 
 ### Build, boot and manual testing
 
@@ -6732,7 +6732,7 @@ The backend listens on guest `127.0.0.1:18089`; the host browser still accesses
 it through the dashboard on port 18080. For dependencies, the complete query,
 ground truth and validation details, see [the Java guide](java-sql-injection.md).
 
-## Vulnerable C Binaries — SQL injection (CWE-89)
+## Vulnerable C Binaries — SQL injection
 
 ### Build, boot and manual testing
 
@@ -6994,7 +6994,7 @@ not built or boot-tested. No external static-analysis engine was run; CWE-89
 is the expected ground truth supported by the installed C flow and reproduced
 SQL behavior.
 
-### doorlock-cwe089-c-sql-injection
+### C SQL Injection — doorlock
 
 Simulated device: **access-control door lock**, reusing
 `meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
@@ -7076,7 +7076,7 @@ The default compressed rootfs is
 `deploy-images/doorlock-cwe089-c-sql-injection/qemuarm64/iotbench-doorlock-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### envsensor-cwe089-c-sql-injection
+### C SQL Injection — envsensor
 
 Simulated device: **environmental sensor**, reusing
 `meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
@@ -7158,7 +7158,7 @@ The default compressed rootfs is
 `deploy-images/envsensor-cwe089-c-sql-injection/qemuarm64/iotbench-envsensor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### healthmonitor-cwe089-c-sql-injection
+### C SQL Injection — healthmonitor
 
 Simulated device: **health monitor**, reusing
 `meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
@@ -7240,7 +7240,7 @@ The default compressed rootfs is
 `deploy-images/healthmonitor-cwe089-c-sql-injection/qemuarm64/iotbench-healthmonitor-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### ipcamera-cwe089-c-sql-injection
+### C SQL Injection — ipcamera
 
 Simulated device: **surveillance IP camera**, reusing
 `meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
@@ -7322,7 +7322,7 @@ The default compressed rootfs is
 `deploy-images/ipcamera-cwe089-c-sql-injection/qemuarm64/iotbench-ipcamera-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### plc-cwe089-c-sql-injection
+### C SQL Injection — plc
 
 Simulated device: **industrial PLC gateway (OT)**, reusing
 `meta-iotbench/recipes-devices/plc/`. Firmware directory:
@@ -7404,7 +7404,7 @@ The default compressed rootfs is
 `deploy-images/plc-cwe089-c-sql-injection/qemuarm64/iotbench-plc-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### router-cwe089-c-sql-injection
+### C SQL Injection — router
 
 Simulated device: **network router / gateway**, reusing
 `meta-iotbench/recipes-devices/router/`. Firmware directory:
@@ -7486,7 +7486,7 @@ The default compressed rootfs is
 `deploy-images/router-cwe089-c-sql-injection/qemuarm64/iotbench-router-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### smartbulb-cwe089-c-sql-injection
+### C SQL Injection — smartbulb
 
 Simulated device: **lighting / smart bulb**, reusing
 `meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
@@ -7568,7 +7568,7 @@ The default compressed rootfs is
 `deploy-images/smartbulb-cwe089-c-sql-injection/qemuarm64/iotbench-smartbulb-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### smarthub-cwe089-c-sql-injection
+### C SQL Injection — smarthub
 
 Simulated device: **controller / smart hub**, reusing
 `meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
@@ -7650,7 +7650,7 @@ The default compressed rootfs is
 `deploy-images/smarthub-cwe089-c-sql-injection/qemuarm64/iotbench-smarthub-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### smartplug-cwe089-c-sql-injection
+### C SQL Injection — smartplug
 
 Simulated device: **energy-management smart plug**, reusing
 `meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
@@ -7732,7 +7732,7 @@ The default compressed rootfs is
 `deploy-images/smartplug-cwe089-c-sql-injection/qemuarm64/iotbench-smartplug-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### smartspeaker-cwe089-c-sql-injection
+### C SQL Injection — smartspeaker
 
 Simulated device: **audio / voice-assistant speaker**, reusing
 `meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
@@ -7814,7 +7814,7 @@ The default compressed rootfs is
 `deploy-images/smartspeaker-cwe089-c-sql-injection/qemuarm64/iotbench-smartspeaker-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-### thermostat-cwe089-c-sql-injection
+### C SQL Injection — thermostat
 
 Simulated device: **climate-control thermostat**, reusing
 `meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
@@ -7896,7 +7896,7 @@ The default compressed rootfs is
 `deploy-images/thermostat-cwe089-c-sql-injection/qemuarm64/iotbench-thermostat-cwe089-c-sql-injection-qemuarm64.rootfs.ext4.zst`,
 with kernel `Image` beside it. Use `YOCTO_MACHINE` consistently for other targets.
 
-## Vulnerable C Binaries — Null Pointer Dereference (CWE-476)
+## Vulnerable C Binaries — Null Pointer Dereference
 
 ### Build, boot and manual testing
 
@@ -8187,7 +8187,7 @@ Each device export contains `build.log`, `rootfs.manifest`,
 Other supported architectures were not built or boot-tested. The static finding
 comes from GCC source analysis; no independent binary-only CWE analyzer was run.
 
-### doorlock-cwe476-null-pointer-dereference
+### Null Pointer Dereference — doorlock
 
 Simulated category: **access-control door lock**. Existing device directory:
 `meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
@@ -8250,7 +8250,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/doorlock-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### envsensor-cwe476-null-pointer-dereference
+### Null Pointer Dereference — envsensor
 
 Simulated category: **environmental sensor**. Existing device directory:
 `meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
@@ -8313,7 +8313,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/envsensor-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### healthmonitor-cwe476-null-pointer-dereference
+### Null Pointer Dereference — healthmonitor
 
 Simulated category: **health monitor**. Existing device directory:
 `meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
@@ -8376,7 +8376,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/healthmonitor-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### ipcamera-cwe476-null-pointer-dereference
+### Null Pointer Dereference — ipcamera
 
 Simulated category: **surveillance IP camera**. Existing device directory:
 `meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
@@ -8439,7 +8439,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/ipcamera-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### plc-cwe476-null-pointer-dereference
+### Null Pointer Dereference — plc
 
 Simulated category: **industrial PLC gateway (OT)**. Existing device directory:
 `meta-iotbench/recipes-devices/plc/`. Firmware directory:
@@ -8502,7 +8502,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/plc-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### router-cwe476-null-pointer-dereference
+### Null Pointer Dereference — router
 
 Simulated category: **network gateway**. Existing device directory:
 `meta-iotbench/recipes-devices/router/`. Firmware directory:
@@ -8565,7 +8565,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/router-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### smartbulb-cwe476-null-pointer-dereference
+### Null Pointer Dereference — smartbulb
 
 Simulated category: **lighting / smart bulb**. Existing device directory:
 `meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
@@ -8628,7 +8628,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/smartbulb-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### smarthub-cwe476-null-pointer-dereference
+### Null Pointer Dereference — smarthub
 
 Simulated category: **controller / smart hub**. Existing device directory:
 `meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
@@ -8691,7 +8691,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/smarthub-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### smartplug-cwe476-null-pointer-dereference
+### Null Pointer Dereference — smartplug
 
 Simulated category: **energy-management smart plug**. Existing device directory:
 `meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
@@ -8754,7 +8754,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/smartplug-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### smartspeaker-cwe476-null-pointer-dereference
+### Null Pointer Dereference — smartspeaker
 
 Simulated category: **audio / voice-assistant speaker**. Existing device directory:
 `meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
@@ -8817,7 +8817,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/smartspeaker-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-### thermostat-cwe476-null-pointer-dereference
+### Null Pointer Dereference — thermostat
 
 Simulated category: **climate-control thermostat**. Existing device directory:
 `meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
@@ -8880,7 +8880,7 @@ unprivileged execution. Per-image runtime results, when available, are in
 `deploy-images/thermostat-cwe476-null-pointer-dereference/qemuarm64/validation-console.log`;
 the completed-validation section states which results were actually observed.
 
-## Vulnerable C Binaries — Integer Overflow (CWE-190)
+## Vulnerable C Binaries — Integer Overflow
 
 ### Build, boot and manual testing
 
@@ -9250,7 +9250,7 @@ was identified. No independent binary-only CWE analyzer was run. The static
 finding is expected ground truth supported by the source flow, actual native
 multiplication, exact numerical behavior and separate unsigned-overflow diagnostic.
 
-### doorlock-cwe190-integer-overflow
+### Integer Overflow — doorlock
 
 Simulated device category: **access-control door lock**, reusing
 `meta-iotbench/recipes-devices/doorlock/`. Firmware directory:
@@ -9338,7 +9338,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### envsensor-cwe190-integer-overflow
+### Integer Overflow — envsensor
 
 Simulated device category: **environmental sensor**, reusing
 `meta-iotbench/recipes-devices/envsensor/`. Firmware directory:
@@ -9426,7 +9426,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### healthmonitor-cwe190-integer-overflow
+### Integer Overflow — healthmonitor
 
 Simulated device category: **health monitor**, reusing
 `meta-iotbench/recipes-devices/healthmonitor/`. Firmware directory:
@@ -9514,7 +9514,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### ipcamera-cwe190-integer-overflow
+### Integer Overflow — ipcamera
 
 Simulated device category: **surveillance IP camera**, reusing
 `meta-iotbench/recipes-devices/ipcamera/`. Firmware directory:
@@ -9602,7 +9602,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### plc-cwe190-integer-overflow
+### Integer Overflow — plc
 
 Simulated device category: **industrial PLC gateway (OT)**, reusing
 `meta-iotbench/recipes-devices/plc/`. Firmware directory:
@@ -9690,7 +9690,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### router-cwe190-integer-overflow
+### Integer Overflow — router
 
 Simulated device category: **network router / gateway**, reusing
 `meta-iotbench/recipes-devices/router/`. Firmware directory:
@@ -9778,7 +9778,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### smartbulb-cwe190-integer-overflow
+### Integer Overflow — smartbulb
 
 Simulated device category: **lighting / smart bulb**, reusing
 `meta-iotbench/recipes-devices/smartbulb/`. Firmware directory:
@@ -9866,7 +9866,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### smarthub-cwe190-integer-overflow
+### Integer Overflow — smarthub
 
 Simulated device category: **controller / smart hub**, reusing
 `meta-iotbench/recipes-devices/smarthub/`. Firmware directory:
@@ -9954,7 +9954,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### smartplug-cwe190-integer-overflow
+### Integer Overflow — smartplug
 
 Simulated device category: **energy-management smart plug**, reusing
 `meta-iotbench/recipes-devices/smartplug/`. Firmware directory:
@@ -10042,7 +10042,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### smartspeaker-cwe190-integer-overflow
+### Integer Overflow — smartspeaker
 
 Simulated device category: **audio / voice-assistant speaker**, reusing
 `meta-iotbench/recipes-devices/smartspeaker/`. Firmware directory:
@@ -10130,7 +10130,7 @@ The completed-validation section describes diagnostic limits. Evidence is saved 
 `validation-console.log`. The shared procedures above describe architecture
 selection, exact outputs, distinction from other CWEs and diagnostic limits.
 
-### thermostat-cwe190-integer-overflow
+### Integer Overflow — thermostat
 
 Simulated device category: **climate-control thermostat**, reusing
 `meta-iotbench/recipes-devices/thermostat/`. Firmware directory:
