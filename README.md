@@ -44,31 +44,28 @@ drops to the non-root `yocto` account before invoking BitBake. The directory
 keeps its host owner and group; group write and setgid let the builder and
 host owner share exported files even when their numeric user IDs differ.
 The entrypoint checks writability as the build user before starting the build.
-Use `docker compose up --build --force-recreate yocto` to apply this to an
-existing container; restarting an old container does not update its settings.
+Each `docker compose run --rm yocto` invocation creates a container with the
+current settings and performs this check before building the selected firmware.
 
-### Testing on Linux without host QEMU
+### Build and boot a selected firmware
 
-After the firmware build, run `./scripts/run-qemu-docker.sh` to reuse native
-QEMU from the `yocto-build` volume and `zstd` from the builder image.
-This Linux-only launcher uses host networking with the existing loopback-only
-port forwards, a non-root container, read-only exports and a temporary rootfs.
-It supports `FIRMWARE`, `YOCTO_MACHINE` and `QEMU_HTTP_PORT`.
-For a background router test:
+Docker compiles the firmware; host QEMU boots the exported image. Install the
+matching `qemu-system-*` executable and `zstd` on the host, then select a device
+and scenario using the [Marco guide](docs/marco-payloads.md#build-and-boot-any-device):
 
 ```bash
-QEMU_DETACH=1 QEMU_HTTP_PORT=18080 ./scripts/run-qemu-docker.sh
-curl http://127.0.0.1:18080/
-docker stop iotbench-qemu-router-cwe078-os-command-injection-qemuarm64
+TEST_DEVICE=router
+TEST_SCENARIO=cwe521-permit-empty-passwords
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-Guest writes are discarded when the container stops. The native QEMU sysroot
-must remain in the build volume. To access the dashboard from your laptop,
-forward the server loopback port with SSH.
-
-The FTP test runner (`python3 scripts/test-ftp-write-rights.py --device router`)
-also selects this Docker runtime when native QEMU or zstd is missing. Use
-`--qemu-backend native` or `--qemu-backend docker` to select one explicitly.
+For a named Marco scenario, the builder selects its matching fixture configuration.
+The FTP test runner also uses `scripts/run-qemu.sh`; `--build` invokes the same
+Compose build command before testing. For a remote host, forward the dashboard's
+loopback port to your workstation.
 
 ## Devices and peripherals
 

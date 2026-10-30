@@ -171,9 +171,16 @@ SMP="${QEMU_SMP:-$SMP}"
 
 if [ ! -f "${ROOTFS_ARCHIVE}" ]; then
     echo "Firmware not found: ${ROOTFS_ARCHIVE}" >&2
-    echo "Build it first, e.g. YOCTO_MACHINE=${MACHINE} FIRMWARE=${FIRMWARE} docker compose up yocto" >&2
+    echo "Build it first: YOCTO_MACHINE=${MACHINE} FIRMWARE=${FIRMWARE} docker compose run --rm yocto" >&2
     exit 1
 fi
+
+for required_command in "$QBIN" zstd; do
+    if ! command -v "$required_command" >/dev/null 2>&1; then
+        echo "Missing host command: $required_command. Install QEMU and zstd before booting." >&2
+        exit 1
+    fi
+done
 
 if [ "${QEMU_PERSIST:-0}" = "1" ]; then
     # Persist writes into the .ext4. Refresh it only from a newer export.

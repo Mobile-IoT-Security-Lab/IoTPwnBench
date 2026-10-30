@@ -7,6 +7,40 @@ set -eo pipefail
 FIRMWARE="${FIRMWARE:-router-cwe078-os-command-injection}"
 IMAGE="iotbench-${FIRMWARE}"
 
+# Selecting a named Marco fixture is sufficient for the common Compose command.
+# Keep recipe-level guards and explicit disable/production/mixing checks intact.
+fixture_flag=""
+case "$FIRMWARE" in
+    *-cwe276-bad-write-rights) fixture_flag=IOTBENCH_ENABLE_FTP_WRITE_FIXTURE ;;
+    *-cwe798-unencrypted-traffic) fixture_flag=IOTBENCH_ENABLE_TELNET_FIXTURE ;;
+    *-cwe798-sudo-environment) fixture_flag=IOTBENCH_ENABLE_SUDO_ENV_FIXTURE ;;
+    *-cwe088-cronjob-wildcard-injection) fixture_flag=IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE ;;
+    *-cwe798-password-leak-*) fixture_flag=IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE ;;
+    *-cwe022-rest-internal-files) fixture_flag=IOTBENCH_ENABLE_REST_FIXTURE ;;
+    *-cwe???-apache-web) fixture_flag=IOTBENCH_ENABLE_APACHE_FIXTURE ;;
+    *-cwe022-native-path-traversal|*-cwe020-native-filename-validation) fixture_flag=IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE ;;
+    *-cwe787-native-buffer-overflow) fixture_flag=IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE ;;
+    *-cwe020-native-connection-string) fixture_flag=IOTBENCH_ENABLE_CONNECTION_FIXTURE ;;
+    *-cwe061-native-symlink-following) fixture_flag=IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE ;;
+    *-cwe078-java-os-command-injection|*-cwe077-java-app-command-injection) fixture_flag=IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE ;;
+    *-cwe502-java-deserialization) fixture_flag=IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE ;;
+    *-cwe798-embedded-auth-*) fixture_flag=IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE ;;
+esac
+if [[ -n "$fixture_flag" ]]; then
+    export "$fixture_flag=${!fixture_flag-1}"
+    export IOTBENCH_BUILD_MODE="${IOTBENCH_BUILD_MODE-fixture}"
+    if [[ "${!fixture_flag}" != 1 || "$IOTBENCH_BUILD_MODE" != fixture ]]; then
+        echo "Selected firmware requires fixture mode and must not be explicitly disabled" >&2
+        exit 1
+    fi
+    while IFS='=' read -r key value; do
+        if [[ "$key" == IOTBENCH_ENABLE_*_FIXTURE && "$key" != "$fixture_flag" && "$value" != 0 ]]; then
+            echo "Selected firmware cannot be mixed with another fixture family" >&2
+            exit 1
+        fi
+    done < <(env)
+fi
+
 source /opt/yocto/yocto-env.sh
 # These service fixtures also need a global BitBake configuration: environment
 # variables alone are not visible to recipe parse-time guards.

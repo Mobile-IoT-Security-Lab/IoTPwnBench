@@ -147,7 +147,8 @@ def launcher_checks(catalog):
         wrapper = scripts / "container-build-and-export.sh"
         wrapper.write_text((ROOT / "scripts/container-build-and-export.sh").read_text().replace(
             "source /opt/yocto/yocto-env.sh", 'source "' + str(setup) + '"'))
-        for config, expected in (({}, 1), ({ENABLE: "1", "IOTBENCH_BUILD_MODE": "production"}, 1),
+        for config, expected in (({}, 70), ({ENABLE: "0"}, 1),
+                                 ({ENABLE: "1", "IOTBENCH_BUILD_MODE": "production"}, 1),
                                  ({ENABLE: "1", "IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE": "1"}, 1),
                                  ({ENABLE: "1", "IOTBENCH_BUILD_MODE": "fixture"}, 70)):
             log.unlink(missing_ok=True)

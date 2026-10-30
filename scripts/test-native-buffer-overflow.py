@@ -148,7 +148,8 @@ def wrappers():
         bitbake = stage / "bitbake"
         bitbake.write_text('#!/bin/sh\ncat "$2" > "$TEST_LOG"\nexit 19\n')
         bitbake.chmod(0o755)
-        for extra, expected in (({}, 1),
+        for extra, expected in (({}, 19),
+                                ({"IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE": "0"}, 1),
                                 ({"IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE": "1"}, 19),
                                 ({"IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE": "1", "IOTBENCH_BUILD_MODE": "production"}, 1),
                                 ({"IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE": "1", "IOTBENCH_NATIVE_BUFFER_ASAN": "1"}, 19),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Boot exported FTP write-rights fixtures and test real FTP on the guest console.
 
-Requires Python 3 and either native QEMU/zstd or the built Docker/Yocto runtime.
-Selects the available repository launcher; creates only disposable QEMU snapshots.
+Requires Python 3, native QEMU and zstd.
+Uses scripts/run-qemu.sh with disposable snapshots, like the manual procedure.
 """
 
 import argparse
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 
-def verify(device, timeout, backend='auto'):
+def verify(device, timeout):
     firmware = f"{device}-cwe276-bad-write-rights"
     environment = dict(os.environ, FIRMWARE=firmware, QEMU_PERSIST="0")
     machine = environment.get("YOCTO_MACHINE", "qemuarm64")
@@ -30,15 +30,10 @@ def verify(device, timeout, backend='auto'):
                 "qemumips": "qemu-system-mips"}
     if machine not in binaries:
         raise ValueError("Unsupported machine: " + machine)
-    if backend == "auto":
-        backend = "native" if shutil.which(binaries[machine]) and shutil.which("zstd") else "docker"
-    launcher = ROOT / ("scripts/run-qemu-docker.sh" if backend == "docker" else "scripts/run-qemu.sh")
-    container = f"iotbench-qemu-{firmware}-{machine}"
-    if backend == "docker":
-        if not shutil.which("docker"):
-            raise RuntimeError("Install native QEMU/zstd or use the built Docker/Yocto runtime")
-        if subprocess.check_output(["docker", "ps", "-aq", "--filter", f"name=^/{container}$"]).strip():
-            raise RuntimeError("QEMU container is already in use: " + container)
+    missing = [name for name in (binaries[machine], "zstd") if not shutil.which(name)]
+    if missing:
+        raise RuntimeError("Install the host QEMU requirements: " + ", ".join(missing))
+    launcher = ROOT / "scripts/run-qemu.sh"
     master, slave = pty.openpty()
     transcript = bytearray()
     process = None
@@ -106,11 +101,7 @@ def verify(device, timeout, backend='auto'):
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                if backend == "docker":
-                    subprocess.run(["docker", "stop", "--time", "5", container], check=False,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    process.terminate()
+                process.terminate()
                 process.wait(timeout=15)
         os.close(master)
         log_path.write_bytes(transcript)
@@ -126,18 +117,16 @@ def main():
     selection.add_argument("--device", choices=devices)
     selection.add_argument("--all", action="store_true", help="test every supported device sequentially")
     parser.add_argument("--timeout", type=int, default=150, help="maximum seconds per console step")
-    parser.add_argument("--build", action="store_true", help="build and export each opted-in synthetic fixture before testing")
-    parser.add_argument("--qemu-backend", choices=("auto", "native", "docker"), default="auto")
+    parser.add_argument("--build", action="store_true", help="build and export each selected fixture before testing")
     arguments = parser.parse_args()
     for device in devices if arguments.all else [arguments.device]:
         if arguments.build:
             subprocess.run(
-                ["docker", "compose", "run", "--rm", "-e",
-                 "IOTBENCH_ENABLE_FTP_WRITE_FIXTURE=1", "yocto"],
+                ["docker", "compose", "run", "--rm", "yocto"],
                 cwd=ROOT, env=dict(os.environ, FIRMWARE=f"{device}-cwe276-bad-write-rights"),
                 check=True,
             )
-        verify(device, arguments.timeout, arguments.qemu_backend)
+        verify(device, arguments.timeout)
 
 
 if __name__ == "__main__":

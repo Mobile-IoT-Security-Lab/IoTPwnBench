@@ -1,18 +1,24 @@
 # Marco Payloads
 
-Operational guide to **14 catalog tests**, plus the embedded-credentials extra.
-Start with local checks, then build and verify a router image before repeating
-the procedure for other devices. Numbering follows Marco's catalog assignments.
+<a id="setup"></a>
 
-<a id="how-to-use-this-guide"></a>
-<a id="common-setup"></a>
+## How to use this guide
 
-## SETUP
+Start by choosing a device keyword and a scenario from the manual test index,
+then follow its build, boot and test procedure. The fourteen numbered tests
+follow Marco's catalog assignments; embedded credentials are an additional family.
+This guide describes procedures, not a new execution of the runtime tests.
 
-### Environment and prerequisites
+### Common setup
 
-Run host commands from the repository root, beside `compose.yaml` and `scripts/`,
-as an ordinary Linux user. **Guest** commands run in QEMU's serial console.
+- **Host**: the computer running Docker and QEMU. Open a terminal at the
+  repository root, where `compose.yaml` and `scripts/` are located.
+- **Guest**: the firmware running in QEMU. Use its serial console after
+  boot; the standard login is `root` with password `routeradmin`.
+- **Second host terminal**: use this for host checks while a manual QEMU
+  instance remains open. Close that instance before an automated runner
+  starts its own VM. Repeat the firmware and machine variable assignments
+  when opening another host terminal.
 
 `python3` must resolve to **Python 3.9+**. If necessary, replace it in host
 commands with the absolute path of a compatible interpreter.
@@ -32,8 +38,17 @@ python3 --version
 | Apache | Apache 2.4 with CGI modules; native Chrome/Chromium and fonts for XSS/CSRF |
 | Java | Local JDK 17+ with `java` and `javac` |
 | Firmware builds | Docker daemon access and Docker Compose |
-| Automated FTP/QEMU console | Python `pexpect` and a native or Docker QEMU backend |
+| Firmware boot | Matching host `qemu-system-*` executable and `zstd` |
+| Automated QEMU console | Host QEMU; Python `pexpect` where required by the runner |
 | Filesystem inspection | `zstd` and `debugfs` from e2fsprogs |
+
+Host-side namespace regressions require Linux. The firmware itself runs in QEMU.
+On macOS, install the boot tools with `brew install qemu zstd`. Before the first
+firmware build, prepare the Docker builder once:
+
+```bash
+docker compose build yocto
+```
 
 For namespace-based runners, check support before testing:
 
@@ -53,8 +68,6 @@ IOTBENCH_JDK=/path/to/jdk-17
 "$IOTBENCH_JDK/bin/javac" -version
 ```
 
-### Results and scope
-
 Run one block at a time and check `echo "exit=$?"` immediately after each test.
 **PASS/OK + exit 0** confirms the checks that ran; **SKIP** is incomplete coverage;
 **FAIL/ERROR** requires investigation. Expected failures inside a runner are
@@ -66,64 +79,111 @@ its controls. Dashboard availability alone does not verify the weakness.
 Keep logs, artifact hashes and skipped checks with the validation record.
 This guide describes procedures, not a claim that every image was tested.
 
-<a id="device-keywords"></a>
+### Device keywords
 
-### Devices
+Use the exact keyword from this table when selecting a firmware:
 
-All tests support these eleven keywords:
+| Device type | Keyword |
+| --- | --- |
+| Router | `router` |
+| IP camera | `ipcamera` |
+| Smart plug | `smartplug` |
+| Thermostat | `thermostat` |
+| Programmable logic controller | `plc` |
+| Smart bulb | `smartbulb` |
+| Smart home hub | `smarthub` |
+| Environmental sensor | `envsensor` |
+| Smart speaker | `smartspeaker` |
+| Health monitor | `healthmonitor` |
+| Door lock | `doorlock` |
 
-`router`, `ipcamera`, `smartplug`, `thermostat`, `plc`, `smartbulb`, `smarthub`,
-`envsensor`, `smartspeaker`, `healthmonitor`, `doorlock`.
+The firmware ID is `<device-keyword>-<scenario-keyword>`. Every scenario has
+a recipe for each listed device; variant tables select distinct images.
 
-<a id="build-and-boot-any-device"></a>
+### Build and boot any device
 
-### Build and boot
+Run the following commands in the same host terminal at the repository root.
+Change only `TEST_DEVICE` and `TEST_SCENARIO` to select a different firmware,
+then rerun the block. The default architecture is `qemuarm64`; for another
+supported architecture, set `YOCTO_MACHINE` consistently for build and boot.
 
-For the firmware phase, prepare the builder once and keep the same machine for
-build and boot. Examples reuse these variables in the same shell:
+Docker compiles the firmware; QEMU boots the exported image. These are the two
+consecutive steps of this workflow.
+
+On **Apple Silicon**, you can accelerate `qemuarm64` boots by running these
+commands in the host terminal before the boot commands:
+
+```bash
+export QEMU_ACCEL=hvf
+export QEMU_CPU=host
+```
 
 ```bash
 TEST_DEVICE=router
-export YOCTO_MACHINE=qemuarm64
-docker compose build yocto
-echo "builder_exit=$?"
+TEST_SCENARIO=cwe521-permit-empty-passwords
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-Each test sets `TEST_FIRMWARE=<device>-<scenario>` and supplies its required
-opt-in. Do not enable several fixture families together. Exports are under
-`deploy-images/<firmware>/<machine>/`.
+The build exports its kernel and root filesystem to
+`deploy-images/<device-keyword>-<scenario-keyword>/<machine>/`.
+If you already have an up-to-date export, skip the Docker command and run the
+QEMU command after setting the three variables. After boot, use the selected
+scenario's test below. For SSH empty passwords, go directly to [Test 1](#test-1).
+Run the boot command only if the build succeeded.
 
-After a successful build, choose **one** manual boot method:
+Wait for `login:` and sign into the guest console with `root` / `routeradmin`.
+Run one firmware at a time. To quit QEMU, press **Ctrl-A**, release, then **X**.
+Guest writes are normally discarded when QEMU exits.
 
-```bash
-# Docker: reuse QEMU from the yocto-build volume populated by the build.
-FIRMWARE="$TEST_FIRMWARE" QEMU_HTTP_PORT=18080 ./scripts/run-qemu-docker.sh
-```
+When the image exposes its device dashboard, open <http://127.0.0.1:18080>.
+For a remote host, forward that port to your workstation. Apache, native
+path/buffer/connection/symlink and Java fixtures use the serial console and
+have no dashboard or forwarded network port. The embedded-auth extra locks
+root and is inspected offline as described in its test.
 
-```bash
-# Native: matching QEMU and zstd must be installed on the host.
-FIRMWARE="$TEST_FIRMWARE" QEMU_HTTP_PORT=18080 ./scripts/run-qemu.sh
-```
+### Manual test index
 
-Run one firmware at a time. The standard serial-console login is `root` /
-`routeradmin`; embedded-auth images lock root and use offline inspection instead.
-Exit QEMU with **Ctrl-A**, release, then **X**. Default guest writes are disposable.
+| Test | Scenario keyword | Where to run it | Evidence of the defect |
+| --- | --- | --- | --- |
+| [Test 1: SSH empty passwords](#test-1) | `cwe521-permit-empty-passwords` | Host / extracted firmware | Effective policy permits empty passwords; control rejects them |
+| [Test 2: FTP write permissions](#test-2) | `cwe276-bad-write-rights` | Guest / host VM runner | Upload succeeds in the writable directory and fails in the control |
+| [Test 3: Telnet plaintext](#test-3) | `cwe798-unencrypted-traffic` | Guest / isolated host | Synthetic credentials and commands appear in plaintext |
+| [Test 4: Sudo environment](#test-4) | `cwe798-sudo-environment` | Guest | Preserved variables select the diagnostic behavior with EUID 0 |
+| [Test 5: Cron wildcard](#test-5) | `cwe088-cronjob-wildcard-injection` | Guest | Option-like filename selects the diagnostic; corrected control stays nominal |
+| [Test 6: Password leak](#test-6) | `cwe798-password-leak-<variant>` | Guest / extracted firmware | Recovered synthetic credential is accepted; wrong value is rejected |
+| [Test 7: REST internal files](#test-7) | `cwe022-rest-internal-files` | Guest / isolated host | Config route returns the restricted synthetic marker; control denies it |
+| [Test 8: Apache applications](#test-8) | `cwe<CWE>-apache-web` | Guest / isolated host; browser for XSS and CSRF | Selected defect produces its marker or unauthorized state change |
+| [Test 9: C path and filename](#test-9) | `cwe022-native-path-traversal`, `cwe020-native-filename-validation` | Guest / isolated host | Disallowed synthetic file is read; corrected control rejects it |
+| [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the out-of-bounds write; corrected control rejects the input |
+| [Test 11: C connection string](#test-11) | `cwe020-native-connection-string` | Guest / host | Injected field changes SQLite from read-only to writable capability |
+| [Test 12: C symbolic links](#test-12) | `cwe061-native-symlink-following` | Guest / isolated host | Fixed file follows the synthetic symlink; corrected control denies it |
+| [Test 13: Java commands](#test-13) | `cwe078-java-os-command-injection`, `cwe077-java-app-command-injection` | Guest / isolated host | Selected interpreter creates its extra synthetic marker |
+| [Test 14: Java deserialization](#test-14) | `cwe502-java-deserialization` | Guest / isolated host | Unexpected class triggers one callback; allowlist control triggers zero |
+| [Extra: Embedded pairs](#extra-embedded) | `cwe798-embedded-auth-<variant>` | Host / extracted firmware | Matching synthetic pair is accepted; incorrect fields are denied |
 
-When the image exposes its device dashboard, open `http://127.0.0.1:18080/`.
-For a remote host, forward that port to your workstation first. Apache, native
-path/buffer/connection/symlink and Java fixtures are serial-only and have no
-dashboard or forwarded network port.
+The 14 tests cover 39 variants per device; the extra family adds eight.
+Choose one concrete variant wherever the index uses a placeholder.
+
+### Technical references
+
+The catalog is [Catalogo_Test_Sicurezza_Firmware_IoT.xlsm](../Catalogo_Test_Sicurezza_Firmware_IoT.xlsm).
+Execution evidence belongs in [validation records](validation/). Catalog numbers
+and variant counts appear in each test's scope section.
 
 <a id="inspect-the-generated-firmware"></a>
 
-### Inspect an exported filesystem
+**Firmware extraction — host:**
 
 For tests using `--rootfs`, extract the selected `TEST_FIRMWARE` without booting:
 
 ```bash
+TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
 TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
 mkdir "$TEST_INSPECT/rootfs" &&
-zstd -dc "deploy-images/$TEST_FIRMWARE/$YOCTO_MACHINE/iotbench-$TEST_FIRMWARE-$YOCTO_MACHINE.rootfs.ext4.zst" \
+zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
   > "$TEST_INSPECT/image.ext4" &&
 LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
   > "$TEST_INSPECT/extraction.log" 2>&1
@@ -139,41 +199,44 @@ warnings are possible as a normal user; original ownership is not verified by
 that extracted copy. Other errors must be resolved before testing the rootfs.
 Use only this temporary tree for `--rootfs`, never the host's `/`.
 
-<a id="manual-test-index"></a>
-
-### Test index
-
-Variants are separate scenarios per device, not additional devices.
-
-| Test | Catalog no. | Variants | Subject |
-| --- | --- | --- | --- |
-| [Test 1](#test-1) | 2 | 1 | SSH empty-password policy |
-| [Test 2](#test-2) | 6 | 1 | FTP write permissions |
-| [Test 3](#test-3) | 9 | 1 | Telnet plaintext traffic |
-| [Test 4](#test-4) | 12 | 1 | Sudo environment |
-| [Test 5](#test-5) | 15 | 1 | Cron wildcard injection |
-| [Test 6](#test-6) | 18 | 15 | Password leak |
-| [Test 7](#test-7) | 21 | 1 | REST internal files |
-| [Test 8](#test-8) | 24 | 10 | Apache web applications |
-| [Test 9](#test-9) | 28 | 2 | C path and filename validation |
-| [Test 10](#test-10) | 30 | 1 | C buffer overflow |
-| [Test 11](#test-11) | 33 | 1 | C connection string injection |
-| [Test 12](#test-12) | 36 | 1 | C symbolic links |
-| [Test 13](#test-13) | 39 | 2 | Java command injection |
-| [Test 14](#test-14) | 42 | 1 | Java deserialization |
-| [Extra](#extra-embedded) | — | 8 | Embedded credential pairs |
-
-<a id="technical-references"></a>
-
-The catalog is [Catalogo_Test_Sicurezza_Firmware_IoT.xlsm](../Catalogo_Test_Sicurezza_Firmware_IoT.xlsm).
-Execution evidence belongs in [validation records](validation/).
-
 <a id="weakly-configured-ssh--empty-password-authentication-permitted-cwe-521"></a>
 <a id="test-1"></a>
 
 ## Test 1: SSH empty-password policy — CWE-521
 
-**Purpose:** detect a weak SSH configuration and distinguish its corrected copy.
+### Build, boot and manual testing
+
+**What this tests.** The SSH configuration enables empty passwords, while the corrected
+policy disables them.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe521-permit-empty-passwords
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — host:** extract the image using the
+[shared extraction procedure](#inspect-the-generated-firmware), then run:
+
+```bash
+python3 scripts/test-ssh-empty-passwords.py --rootfs "$TEST_INSPECT/rootfs"
+echo "exit=$?"
+```
+
+Expected: installed policy and native parser checks pass; the rootfs validator
+finds no known SSH server/startup entries or empty password fields.
+**No SSH server or empty-password account is installed. A successful SSH login
+is neither expected nor required.** Boot is optional for this policy test.
+
+### Scenario and scope
+
+Catalog no. **2**; **1 variant** per device.
+
 The installed `/etc/ssh/sshd_config` contains:
 
 ```text
@@ -182,7 +245,12 @@ PasswordAuthentication yes
 PermitRootLogin no
 ```
 
-**Host test:**
+Boot is optional for the SSH policy check; use the common boot commands
+only to inspect the serial console or dashboard.
+
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-ssh-empty-passwords.py
@@ -198,26 +266,6 @@ are rejected by the fixture validator.
 Use `--sshd /path/to/sshd` to select the native parser. `--skip-openssh` runs
 only portable checks and must be recorded as skipping parser validation.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe521-permit-empty-passwords"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
-echo "build_exit=$?"
-```
-
-Extract it using the setup procedure, then run on the host:
-
-```bash
-python3 scripts/test-ssh-empty-passwords.py --rootfs "$TEST_INSPECT/rootfs"
-echo "exit=$?"
-```
-
-Expected: installed policy and native parser checks pass; the rootfs validator
-finds no known SSH server/startup entries or empty password fields.
-**No SSH server or empty-password account is installed. A successful SSH login
-is neither expected nor required.** Boot is optional for this policy test.
-
 Source: [cwe521-permit-empty-passwords](../meta-iotbench/recipes-vulns/cwe521-permit-empty-passwords/).
 References: [OpenSSH option](https://man.openbsd.org/sshd_config#PermitEmptyPasswords),
 [CWE-521](https://cwe.mitre.org/data/definitions/521.html).
@@ -227,43 +275,25 @@ References: [OpenSSH option](https://man.openbsd.org/sshd_config#PermitEmptyPass
 
 ## Test 2: FTP write permissions — CWE-276
 
-**Purpose:** an authenticated maintenance user can upload where policy permits
-only listing/download. Account: `ftpfixture` / `Fixture-FTP-Only-42`, synthetic
-test credentials. Both directories are owned by `root:ftpfixture`:
+### Build, boot and manual testing
 
-| Operation | Expected result |
-| --- | --- |
-| `STOR bad/probe.txt`, directory mode `0775` | Upload succeeds: intended defect |
-| Same upload in `control`, mode `0755` | Rejected |
-| Upload after temporarily correcting `bad` to `0755` | Rejected |
-| Anonymous, root or wrong-password login | Rejected |
+**What this tests.** An authenticated maintenance user can upload where policy permits
+only listing/download.
 
-**Host checks and build:**
+**Build and boot — host:**
 
 ```bash
-python3 scripts/check-ftp-write-rights.py
-echo "exit=$?"
+TEST_DEVICE=router
+TEST_SCENARIO=cwe276-bad-write-rights
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 
-TEST_FIRMWARE="$TEST_DEVICE-cwe276-bad-write-rights"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_ENABLE_FTP_WRITE_FIXTURE=1 yocto
-echo "build_exit=$?"
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-After a successful build:
+**Test — guest:**
 
-```bash
-python3 scripts/test-ftp-write-rights.py --device "$TEST_DEVICE"
-echo "exit=$?"
-```
-
-The runner manages QEMU and saves `/tmp/iotbench-ftp-<device>-qemu.log`.
-It selects native QEMU or Docker automatically; `--qemu-backend native|docker`
-overrides selection. `--all --build` builds and tests all eleven devices.
-
-For an already booted image, the equivalent **guest** command is:
-
-```bash
+```sh
 python3 /usr/share/iotbench/bad-write-rights/test-guest.py --isolated-fixture
 echo "exit=$?"
 ```
@@ -274,6 +304,40 @@ its ports are not forwarded. vsftpd retains its privileged authentication/chroot
 broker, while uploaded files belong to the unprivileged account. This test does
 not demonstrate anonymous upload, root FTP access or command execution.
 
+### Scenario and scope
+
+Catalog no. **6**; **1 variant** per device.
+
+Account: `ftpfixture` / `Fixture-FTP-Only-42`, synthetic
+test credentials. Both directories are owned by `root:ftpfixture`:
+
+| Operation | Expected result |
+| --- | --- |
+| `STOR bad/probe.txt`, directory mode `0775` | Upload succeeds: intended defect |
+| Same upload in `control`, mode `0755` | Rejected |
+| Upload after temporarily correcting `bad` to `0755` | Rejected |
+| Anonymous, root or wrong-password login | Rejected |
+
+### Regression verification
+
+**Test — host:**
+
+```bash
+python3 scripts/check-ftp-write-rights.py
+echo "exit=$?"
+```
+
+After closing any manually booted VM, run the automated firmware check:
+
+```bash
+python3 scripts/test-ftp-write-rights.py --device "$TEST_DEVICE"
+echo "exit=$?"
+```
+
+The runner manages QEMU and saves `/tmp/iotbench-ftp-<device>-qemu.log`.
+It uses the same `scripts/run-qemu.sh` launcher as the manual procedure.
+`--all --build` repeats the same build and test for all eleven devices.
+
 Source: [cwe276-bad-write-rights](../meta-iotbench/recipes-vulns/cwe276-bad-write-rights/).
 
 <a id="weakly-configured-telnet--unencrypted-traffic-cwe-798287276"></a>
@@ -281,13 +345,47 @@ Source: [cwe276-bad-write-rights](../meta-iotbench/recipes-vulns/cwe276-bad-writ
 
 ## Test 3: Telnet plaintext traffic — CWE-798/287/276
 
-**Purpose:** observe a synthetic plaintext session with fixed credentials and
-weak authentication policy. The expected pair is `telnet-fixture` /
+### Build, boot and manual testing
+
+**What this tests.** A synthetic Telnet session exposes fixed credentials and commands
+in plaintext.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-unencrypted-traffic
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+python3 /usr/share/iotbench/unencrypted-traffic/test-session.py \
+  --installed --isolated-fixture --require-pcap \
+  --pcap /tmp/iotbench-telnet.pcap --transcript /tmp/iotbench-telnet-wire.json
+echo "exit=$?"
+```
+
+`STATUS`, `HELP` and `QUIT` return fixed responses. This is a synthetic service,
+not an OS login daemon: other inputs cannot execute commands or start a shell.
+No Telnet port is forwarded to the host.
+
+### Scenario and scope
+
+Catalog no. **9**; **1 variant** per device.
+
+The expected pair is `telnet-fixture` /
 `Fixture-Telnet-Only-42`. The weak policy also accepts another nonempty username
 with that password; the strict username/password control rejects it.
 The policy file is mode `0666`; the permission control changes it to `0644`.
 
-**Host tests:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-telnet-unencrypted-traffic.py --static
@@ -314,28 +412,6 @@ Expected: synthetic credentials and commands are readable without decryption;
 normal behavior and strict controls pass. The loopback-only run skips the
 non-loopback interface check, which the ordinary local run covers.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe798-unencrypted-traffic"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_ENABLE_TELNET_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot using setup, then run in the **guest**:
-
-```bash
-python3 /usr/share/iotbench/unencrypted-traffic/test-session.py \
-  --installed --isolated-fixture --require-pcap \
-  --pcap /tmp/iotbench-telnet.pcap --transcript /tmp/iotbench-telnet-wire.json
-echo "exit=$?"
-```
-
-`STATUS`, `HELP` and `QUIT` return fixed responses. This is a synthetic service,
-not an OS login daemon: other inputs cannot execute commands or start a shell.
-No Telnet port is forwarded to the host.
-
 Source: [cwe798-unencrypted-traffic](../meta-iotbench/recipes-vulns/cwe798-unencrypted-traffic/).
 
 <a id="bad-sudo-rights--allow-changes-to-environment-variables-cwe-798"></a>
@@ -343,8 +419,40 @@ Source: [cwe798-unencrypted-traffic](../meta-iotbench/recipes-vulns/cwe798-unenc
 
 ## Test 4: Sudo environment — CWE-798
 
-**Purpose:** caller-controlled variables preserved by sudo change a privileged
-diagnostic helper's behavior. The policy permits only
+### Build, boot and manual testing
+
+**What this tests.** Caller-controlled variables preserved by sudo change a privileged
+diagnostic helper's behavior.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-sudo-environment
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+python3 /usr/share/iotbench/sudo-environment/test-session.py \
+  --installed --isolated-fixture
+echo "exit=$?"
+```
+
+Expected: the permitted diagnostic runs with `FIXTURE_EUID=0`, while unlisted
+caller variables remain absent or are rejected. The synthetic credential is
+hardcoded for CWE-798 analysis. `FIXTURE_CONFIG` is a fixed value, not a path;
+the helper does not execute user commands, load libraries or read arbitrary files.
+
+### Scenario and scope
+
+Catalog no. **12**; **1 variant** per device.
+
+The policy permits only
 `sudo -n /usr/bin/fixture-sudo-env --fixture-test` for the locked `fixtureenv`
 account; `env_keep` preserves these three inputs:
 
@@ -354,7 +462,9 @@ account; `env_keep` preserves these three inputs:
 | `FIXTURE_CONFIG` | `public` | `Fixture-Sudo-Only-42` |
 | `TEST_PROFILE` | `baseline` | `boundary` |
 
-**Host tests:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-sudo-env-fixture.py --static
@@ -368,28 +478,6 @@ Expected: normal output is `RESULT=nominal`; diagnostic inputs yield
 rejected. The local test exercises the helper; it does not prove real sudo
 policy behavior or root execution.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe798-sudo-environment"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_ENABLE_SUDO_ENV_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then test the actual sudo rule in the **guest**:
-
-```bash
-python3 /usr/share/iotbench/sudo-environment/test-session.py \
-  --installed --isolated-fixture
-echo "exit=$?"
-```
-
-Expected: the permitted diagnostic runs with `FIXTURE_EUID=0`, while unlisted
-caller variables remain absent or are rejected. The synthetic credential is
-hardcoded for CWE-798 analysis. `FIXTURE_CONFIG` is a fixed value, not a path;
-the helper does not execute user commands, load libraries or read arbitrary files.
-
 Source: [cwe798-sudo-environment](../meta-iotbench/recipes-vulns/cwe798-sudo-environment/).
 
 <a id="cronjob-wildcard-injection-cwe-8878269"></a>
@@ -397,33 +485,27 @@ Source: [cwe798-sudo-environment](../meta-iotbench/recipes-vulns/cwe798-sudo-env
 
 ## Test 5: Cron wildcard injection — CWE-88/78/269
 
-**Purpose:** a file named `--fixture-diagnostic` is interpreted as an option
-when a maintenance command expands bare `*`. The corrected command uses
-`--fixture-test -- *`, so the same filename remains an operand.
+### Build, boot and manual testing
 
-**Host test:**
+**What this tests.** A file named `--fixture-diagnostic` is interpreted as an option
+when a maintenance command expands bare `*`.
+
+**Build and boot — host:**
 
 ```bash
-python3 scripts/test-cron-wildcard-fixture.py --isolated-fixture
-echo "exit=$?"
+TEST_DEVICE=router
+TEST_SCENARIO=cwe088-cronjob-wildcard-injection
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-Expected: nominal input stays `nominal`; the option-like filename selects
-`synthetic-diagnostic`; the corrected control stays `nominal`.
+**Test — guest:**
 
-**Firmware build:**
+Use a fresh disposable snapshot.
 
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe088-cronjob-wildcard-injection"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture \
-  -e IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot a fresh snapshot, then run in the **guest**:
-
-```bash
+```sh
 CRON_ROOT=/usr/share/iotbench/cronjob-wildcard-injection
 python3 "$CRON_ROOT/fixture-runner.py" --isolated-fixture
 echo "exit=$?"
@@ -441,6 +523,25 @@ must be fresh: the runner refuses to overwrite them. Reboot the disposable
 snapshot before repeating. The schedule and privileged role are simulated;
 nothing is installed in system cron and no privilege escalation is performed.
 
+### Scenario and scope
+
+Catalog no. **15**; **1 variant** per device.
+
+The corrected command uses
+`--fixture-test -- *`, so the same filename remains an operand.
+
+### Regression verification
+
+**Test — host:**
+
+```bash
+python3 scripts/test-cron-wildcard-fixture.py --isolated-fixture
+echo "exit=$?"
+```
+
+Expected: nominal input stays `nominal`; the option-like filename selects
+`synthetic-diagnostic`; the corrected control stays `nominal`.
+
 Source: [cwe088-cronjob-wildcard-injection](../meta-iotbench/recipes-vulns/cwe088-cronjob-wildcard-injection/).
 
 <a id="password-leak--different-file-types-and-patterns-cwe-798"></a>
@@ -448,8 +549,52 @@ Source: [cwe088-cronjob-wildcard-injection](../meta-iotbench/recipes-vulns/cwe08
 
 ## Test 6: Password leak — CWE-798
 
-**Purpose:** recover a synthetic credential from a file and verify that it is
-used by the local authentication helper. Each image contains one variant.
+### Build, boot and manual testing
+
+**What this tests.** A synthetic credential stored in a file is accepted by the local
+authentication helper.
+
+**Build and boot — host:**
+
+The example selects `conf-password`; repeat it for each required variant below.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-password-leak-conf-password
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+AUTH_ROOT=/usr/share/iotbench/password-leak/conf-password
+sed -n 's/^password=//p' "$AUTH_ROOT/auth.conf" | \
+  python3 "$AUTH_ROOT/fixture-auth.py" --isolated-fixture
+echo "correct_exit=$?"
+printf '%s\n' wrong | python3 "$AUTH_ROOT/fixture-auth.py" --isolated-fixture
+echo "wrong_exit=$?"
+```
+
+Expected: `accepted`/0, then `rejected`/1. That manual negative exit 1 is expected.
+Repeat build and image verification for each selected variant; a local suite
+covering all variants does not verify all generated images.
+
+**Check — host:** use the [shared extraction procedure](#inspect-the-generated-firmware), then verify:
+
+```bash
+python3 scripts/test-password-leak-fixture.py --isolated-fixture \
+  --rootfs "$TEST_INSPECT/rootfs" --variant conf-password
+echo "exit=$?"
+```
+
+### Scenario and scope
+
+Catalog no. **18**; **15 variants** per device.
+
+Each image contains one variant.
 
 | Variant | File | Field / representation |
 | --- | --- | --- |
@@ -474,7 +619,11 @@ Exact synthetic values are in the
 [expected findings](../meta-iotbench/recipes-vulns/cwe798-password-leak/files/expected-findings.json)
 map source and installed locations. Base64 is encoding, not encryption.
 
-**Host test — all 15 variants:**
+### Regression verification
+
+**Test — host:**
+
+All 15 variants.
 
 ```bash
 python3 scripts/test-password-leak-fixture.py --isolated-fixture
@@ -486,38 +635,6 @@ correct values and rejected controls. Scripts are parsed as data, not executed.
 C/header authentication is compiled in local tests; those firmware variants
 ship source plus the Python authentication helper, not an extra credential ELF.
 
-**Firmware build — example variant:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe798-password-leak-conf-password"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Extract it using setup, then verify on the **host**:
-
-```bash
-python3 scripts/test-password-leak-fixture.py --isolated-fixture \
-  --rootfs "$TEST_INSPECT/rootfs" --variant conf-password
-echo "exit=$?"
-```
-
-To observe authentication in the booted **guest**:
-
-```bash
-AUTH_ROOT=/usr/share/iotbench/password-leak/conf-password
-sed -n 's/^password=//p' "$AUTH_ROOT/auth.conf" | \
-  python3 "$AUTH_ROOT/fixture-auth.py" --isolated-fixture
-echo "correct_exit=$?"
-printf '%s\n' wrong | python3 "$AUTH_ROOT/fixture-auth.py" --isolated-fixture
-echo "wrong_exit=$?"
-```
-
-Expected: `accepted`/0, then `rejected`/1. That manual negative exit 1 is expected.
-Repeat build and image verification for each selected variant; a local suite
-covering all variants does not verify all generated images.
-
 Source: [cwe798-password-leak](../meta-iotbench/recipes-vulns/cwe798-password-leak/).
 
 <a id="exploitable-rest-interface--internal-files-cwe-22cwe-73"></a>
@@ -525,45 +642,28 @@ Source: [cwe798-password-leak](../meta-iotbench/recipes-vulns/cwe798-password-le
 
 ## Test 7: REST internal files — CWE-22/CWE-73
 
-**Purpose:** the config route reads beyond its intended `fs/api` directory,
-while remaining inside a dedicated synthetic filesystem. The interface is
-HTTP over a private Unix socket, not a browser-accessible TCP service.
+### Build, boot and manual testing
 
-| Request | Vulnerable result | Corrected result |
-| --- | --- | --- |
-| `GET /api/config?file=config.cfg` | 200, synthetic config | Same |
-| `GET /api/config?file=../restricted/marker.txt` | 200, `IOTBENCH_SYNTHETIC_REST_BOUNDARY_MARKER` | 403 |
-| Same traversal, percent-encoded once | 200, same marker | 403 |
-| `GET /api/status?file=status.cfg` | 200, status; traversal rejected | Same |
-| `POST /api/config/read`, body `file=config.cfg` | 200, config; traversal rejected | Same |
-| Escape beyond the synthetic root or follow a symlink | 403 | 403 |
+**What this tests.** The config route reads beyond its intended `fs/api` directory,
+while remaining inside a dedicated synthetic filesystem.
 
-**Host tests:**
+**Build and boot — host:**
 
 ```bash
-python3 scripts/test-rest-fixture.py --isolated-fixture
-echo "exit=$?"
-python3 scripts/test-rest-fixture.py --isolated-fixture --sanitize
-echo "exit=$?"
+TEST_DEVICE=router
+TEST_SCENARIO=cwe022-rest-internal-files
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-Expected: eight test groups pass, including normal requests, traversal and
-corrected controls. Linux `openat2` enforces the outer boundary; it does not
-correct the narrower API-directory policy.
+**Test — guest:**
 
-**Firmware build:**
+Use a fresh disposable snapshot. The full host suite is not installed;
+the following procedure checks the native service.
 
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe022-rest-internal-files"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_REST_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot a fresh snapshot. The full host suite is not installed; test the native
-service manually in the **guest**:
-
-```bash
+```sh
 REST_ROOT=/usr/share/iotbench/rest-internal-files
 "$REST_ROOT/bin/fixture-rest" --isolated-fixture &
 REST_PID=$!
@@ -571,7 +671,7 @@ REST_PID=$!
 
 Wait for `fixture-ready unix-only`, then send normal and traversal requests:
 
-```bash
+```sh
 python3 - <<'PY'
 import socket
 for name in ('config.cfg', '../restricted/marker.txt'):
@@ -593,7 +693,7 @@ PY
 
 Switch to the corrected binary and repeat the same request block:
 
-```bash
+```sh
 kill "$REST_PID"
 wait "$REST_PID" || true
 rm -f "$REST_ROOT/run/rest.sock"
@@ -605,6 +705,37 @@ After its ready message, normal config must remain readable and traversal must
 be denied. Finish with `kill "$REST_PID"` and `wait "$REST_PID" || true`.
 The fixture has no upload, write or command-execution API.
 
+### Scenario and scope
+
+Catalog no. **21**; **1 variant** per device.
+
+The interface is
+HTTP over a private Unix socket, not a browser-accessible TCP service.
+
+| Request | Vulnerable result | Corrected result |
+| --- | --- | --- |
+| `GET /api/config?file=config.cfg` | 200, synthetic config | Same |
+| `GET /api/config?file=../restricted/marker.txt` | 200, `IOTBENCH_SYNTHETIC_REST_BOUNDARY_MARKER` | 403 |
+| Same traversal, percent-encoded once | 200, same marker | 403 |
+| `GET /api/status?file=status.cfg` | 200, status; traversal rejected | Same |
+| `POST /api/config/read`, body `file=config.cfg` | 200, config; traversal rejected | Same |
+| Escape beyond the synthetic root or follow a symlink | 403 | 403 |
+
+### Regression verification
+
+**Test — host:**
+
+```bash
+python3 scripts/test-rest-fixture.py --isolated-fixture
+echo "exit=$?"
+python3 scripts/test-rest-fixture.py --isolated-fixture --sanitize
+echo "exit=$?"
+```
+
+Expected: eight test groups pass, including normal requests, traversal and
+corrected controls. Linux `openat2` enforces the outer boundary; it does not
+correct the narrower API-directory policy.
+
 Source: [cwe022-rest-internal-files](../meta-iotbench/recipes-vulns/cwe022-rest-internal-files/).
 
 <a id="apache-application-fixtures-ten-cwes-eleven-devices"></a>
@@ -612,8 +743,40 @@ Source: [cwe022-rest-internal-files](../meta-iotbench/recipes-vulns/cwe022-rest-
 
 ## Test 8: Apache web applications — ten CWE variants
 
-**Purpose:** one application defect per image, with ordinary inputs and negative
-controls. Apache and synthetic resources run in disposable Linux namespaces.
+### Build, boot and manual testing
+
+**What this tests.** One application defect per image, with ordinary inputs and negative
+controls.
+
+**Build and boot — host:**
+
+The example selects CWE-089; use the three-digit CWE of the selected variant below.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe089-apache-web
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+su -s /bin/sh -c 'python3 /usr/share/iotbench/apache-fixture/fixture-build.py --mode fixture --enable 1 --cwe 089 --apache /usr/sbin/httpd --modules /usr/libexec/apache2/modules' iotapache
+echo "exit=$?"
+```
+
+Only the selected variant is installed. QEMU has no network device for these
+images; the host browser cannot open the guest application. Browser binaries
+are not bundled, so guest XSS/CSRF checks need a matching browser separately.
+
+### Scenario and scope
+
+Catalog no. **24**; **10 variants** per device.
+
+Apache and synthetic resources run in disposable Linux namespaces.
 Accounts are `admin` / `fixture-admin-proof` and `reader` /
 `fixture-reader-proof`. The runner manages sessions, Origin and CSRF tokens.
 
@@ -634,7 +797,11 @@ All other protected routes require the intended session/role checks; protected
 writes also require Origin/CSRF unless that check is the selected defect.
 The CSRF fixture uses different origins on the same site, not a cross-site POST.
 
-**Host tests:** set the native Chrome/Chromium executable, not a launcher script.
+### Regression verification
+
+**Test — host:**
+
+Set the native Chrome/Chromium executable, not a launcher script.
 
 ```bash
 python3 scripts/test-apache-integration.py
@@ -650,27 +817,6 @@ Use `--cwe 089` to select one. `--apache` and `--modules` override discovery.
 `--http-only` permits a **partial** run without a browser: XSS and CSRF remain
 unverified. The suite does not download browsers or dependencies.
 
-**Firmware build — SQL injection example:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe089-apache-web"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_APACHE_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Replace `089` with the three-digit CWE for another variant. Boot using setup,
-then run in the **guest**:
-
-```bash
-su -s /bin/sh -c 'python3 /usr/share/iotbench/apache-fixture/fixture-build.py --mode fixture --enable 1 --cwe 089 --apache /usr/sbin/httpd --modules /usr/libexec/apache2/modules' iotapache
-echo "exit=$?"
-```
-
-Only the selected variant is installed. QEMU has no network device for these
-images; the host browser cannot open the guest application. Browser binaries
-are not bundled, so guest XSS/CSRF checks need a matching browser separately.
-
 Source: [apache-web-fixture](../meta-iotbench/recipes-vulns/apache-web-fixture/).
 
 <a id="native-c-path-fixtures-cwe-22-and-cwe-20"></a>
@@ -678,7 +824,40 @@ Source: [apache-web-fixture](../meta-iotbench/recipes-vulns/apache-web-fixture/)
 
 ## Test 9: C path and filename validation — CWE-22/CWE-20
 
-**Purpose:** test two distinct file-access policies on a private Unix socket.
+### Build, boot and manual testing
+
+**What this tests.** Two native fixtures test distinct file-access policies on a private
+Unix socket.
+
+**Build and boot — host:**
+
+Repeat the procedure for each scenario suffix listed below.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe022-native-path-traversal
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+su -s /bin/sh -c 'python3 /usr/share/iotbench/native-path/fixture-runner.py --isolated-fixture' iotpath
+echo "exit=$?"
+```
+
+The fixture uses Linux namespaces and `openat2`, with no older-kernel fallback.
+Reads remain confined to synthetic data; no dashboard, upload or shell exists.
+Optional target sanitizer binaries require `-e IOTBENCH_NATIVE_PATH_ASAN=1`
+at build time and a compatible target toolchain.
+
+### Scenario and scope
+
+Catalog no. **28**; **2 variants** per device.
+
 A request is a two-byte big-endian length, the ASCII pathname, then EOF.
 
 | Scenario suffix | Witness | Expected vulnerable result |
@@ -690,7 +869,11 @@ A request is a two-byte big-endian length, the ASCII pathname, then EOF.
 malformed frames, absolute paths and escapes beyond the synthetic root fail.
 The CWE-20 variant rejects slashes and stays inside `allowed/`.
 
-**Host tests — both variants:**
+### Regression verification
+
+**Test — host:**
+
+Both variants.
 
 ```bash
 python3 scripts/test-native-path-fixtures.py --isolated-fixture
@@ -699,28 +882,6 @@ python3 scripts/test-native-path-fixtures.py --isolated-fixture --sanitize
 echo "exit=$?"
 ```
 
-**Firmware build:** repeat for each scenario suffix above.
-
-```bash
-TEST_SCENARIO=cwe022-native-path-traversal
-TEST_FIRMWARE="$TEST_DEVICE-$TEST_SCENARIO"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**:
-
-```bash
-su -s /bin/sh -c 'python3 /usr/share/iotbench/native-path/fixture-runner.py --isolated-fixture' iotpath
-echo "exit=$?"
-```
-
-The fixture uses Linux namespaces and `openat2`, with no older-kernel fallback.
-Reads remain confined to synthetic data; no dashboard, upload or shell exists.
-Optional target sanitizer binaries require `-e IOTBENCH_NATIVE_PATH_ASAN=1`
-at build time and a compatible target toolchain.
-
 Source: [native-path-fixture](../meta-iotbench/recipes-vulns/native-path-fixture/).
 
 <a id="native-c-buffer-overflow-cwe-787-cwe-20-cwe-119"></a>
@@ -728,8 +889,48 @@ Source: [native-path-fixture](../meta-iotbench/recipes-vulns/native-path-fixture
 
 ## Test 10: C buffer overflow — CWE-787
 
-**Purpose:** a framed stdin length controls writes into a 64-byte global buffer
-without a destination-capacity check. CWE-20 and CWE-119 describe the same defect.
+### Build, boot and manual testing
+
+**What this tests.** A framed stdin length controls writes into a 64-byte global buffer
+without a destination-capacity check.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe787-native-buffer-overflow
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+Replace `router` with the built device keyword.
+
+```sh
+sh /usr/share/iotbench/native-buffer-overflow/test-guest.sh router
+echo "exit=$?"
+```
+
+**The default guest checks do not exercise the overflow.** To verify that
+diagnostic on the target, rebuild with `-e IOTBENCH_NATIVE_BUFFER_ASAN=1`
+added to the build command, then run:
+
+```sh
+sh /usr/share/iotbench/native-buffer-overflow/test-guest.sh router --asan
+echo "exit=$?"
+```
+
+Target ASan support is required. Normal firmware binaries retain compiler
+hardening; the corrected control is a temporary test build, not another image.
+
+### Scenario and scope
+
+Catalog no. **30**; **1 variant** per device.
+
+CWE-20 and CWE-119 describe the same defect.
 The frame is a two-byte big-endian length, payload bytes, then EOF.
 
 | Input | Expected result |
@@ -740,7 +941,9 @@ The frame is a two-byte big-endian length, payload bytes, then EOF.
 | Same oversized input, corrected control | `ERR CAPACITY`, no ASan error |
 | Malformed or truncated frame | Rejected |
 
-**Host tests:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-native-buffer-overflow.py --static
@@ -754,34 +957,6 @@ corrected control, finishing with exit 0. Use an ordinary user and matching
 compiler/sanitizer runtimes. This runner uses temporary directories and process
 limits, not a filesystem namespace jail.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe787-native-buffer-overflow"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**, replacing `router` with the built device:
-
-```bash
-sh /usr/share/iotbench/native-buffer-overflow/test-guest.sh router
-echo "exit=$?"
-```
-
-**The default guest checks do not exercise the overflow.** To verify that
-diagnostic on the target, rebuild with `-e IOTBENCH_NATIVE_BUFFER_ASAN=1`
-added to the build command, then run:
-
-```bash
-sh /usr/share/iotbench/native-buffer-overflow/test-guest.sh router --asan
-echo "exit=$?"
-```
-
-Target ASan support is required. Normal firmware binaries retain compiler
-hardening; the corrected control is a temporary test build, not another image.
-
 Source: [cwe787-native-buffer-overflow](../meta-iotbench/recipes-vulns/cwe787-native-buffer-overflow/).
 
 <a id="native-connection-string-injection-cwe-20"></a>
@@ -789,7 +964,39 @@ Source: [cwe787-native-buffer-overflow](../meta-iotbench/recipes-vulns/cwe787-na
 
 ## Test 11: C connection string injection — CWE-20
 
-**Purpose:** a caller-controlled cache field changes SQLite connection options.
+### Build, boot and manual testing
+
+**What this tests.** A caller-controlled cache field changes SQLite connection options.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe020-native-connection-string
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+Replace `router` with the built device keyword.
+
+```sh
+sh /usr/share/iotbench/native-connection-string/test-guest.sh router
+echo "exit=$?"
+```
+
+The witness changes connection mode; SQL statements remain constant and no
+database write is performed. Each request uses a disposable local database.
+There are no remote credentials, network database connections or shell commands;
+process/seccomp restrictions are not a complete filesystem namespace jail.
+
+### Scenario and scope
+
+Catalog no. **33**; **1 variant** per device.
+
 The program constructs `file:<temporary-db>?cache=<field>&mode=ro` and passes it
 to `sqlite3_open_v2`. Input is a two-byte big-endian length, ASCII field, then EOF.
 
@@ -800,7 +1007,9 @@ to `sqlite3_open_v2`. Input is a two-byte big-endian length, ASCII field, then E
 | Same witness in corrected control | Rejected by exact-value validation |
 | Ordinary input after the witness | Read-only behavior restored in a fresh database |
 
-**Host tests:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-native-connection-string.py --static
@@ -813,27 +1022,6 @@ Expected: normal, injected and corrected cases pass, including sanitizer checks
 without memory errors. The runner uses the real linked SQLite library and
 checks its URI parsing behavior; it requires SQLite development files.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe020-native-connection-string"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_CONNECTION_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**, using the built device keyword:
-
-```bash
-sh /usr/share/iotbench/native-connection-string/test-guest.sh router
-echo "exit=$?"
-```
-
-The witness changes connection mode; SQL statements remain constant and no
-database write is performed. Each request uses a disposable local database.
-There are no remote credentials, network database connections or shell commands;
-process/seccomp restrictions are not a complete filesystem namespace jail.
-
 Source: [cwe020-native-connection-string](../meta-iotbench/recipes-vulns/cwe020-native-connection-string/).
 
 <a id="native-c-symbolic-link-following-cwe-61-and-cwe-59"></a>
@@ -841,8 +1029,37 @@ Source: [cwe020-native-connection-string](../meta-iotbench/recipes-vulns/cwe020-
 
 ## Test 12: C symbolic-link following — CWE-61/CWE-59
 
-**Purpose:** opening the fixed `allowed/public.cfg` follows a pre-existing
+### Build, boot and manual testing
+
+**What this tests.** Opening the fixed `allowed/public.cfg` follows a pre-existing
 symlink because the final `openat()` lacks `O_NOFOLLOW`.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe061-native-symlink-following
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+su -s /bin/sh -c 'python3 /usr/share/iotbench/native-symlink/fixture-runner.py --isolated-fixture' iotsymlink
+echo "exit=$?"
+```
+
+Expected: ordinary-file, symlink, malformed-request and corrected-control
+checks pass. Both source and sentinel remain within the synthetic filesystem;
+no real system file is targeted.
+
+### Scenario and scope
+
+Catalog no. **36**; **1 variant** per device.
+
 The private socket accepts only the framed command `READ`:
 `00 04 52 45 41 44`, followed by EOF. No pathname comes from the request.
 
@@ -853,7 +1070,9 @@ The private socket accepts only the framed command `READ`:
 | Same symlink with corrected final open | Rejected |
 | Malformed command or request-supplied path | `ERR INVALID` |
 
-**Host test:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-native-symlink-fixture.py --isolated-fixture
@@ -863,26 +1082,6 @@ echo "exit=$?"
 The runner creates the link only in its disposable fixture filesystem.
 This tests link following, not a check/use race or request-path traversal.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe061-native-symlink-following"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**:
-
-```bash
-su -s /bin/sh -c 'python3 /usr/share/iotbench/native-symlink/fixture-runner.py --isolated-fixture' iotsymlink
-echo "exit=$?"
-```
-
-Expected: ordinary-file, symlink, malformed-request and corrected-control
-checks pass. Both source and sentinel remain within the synthetic filesystem;
-no real system file is targeted.
-
 Source: [cwe061-native-symlink-following](../meta-iotbench/recipes-vulns/cwe061-native-symlink-following/).
 
 <a id="java-jar-command-injection-cwe-78--cwe-77-contributing-cwe-20"></a>
@@ -890,8 +1089,46 @@ Source: [cwe061-native-symlink-following](../meta-iotbench/recipes-vulns/cwe061-
 
 ## Test 13: Java command injection — CWE-78/CWE-77
 
-**Purpose:** incomplete label validation lets input cross either an OS-shell
-boundary (`os`) or an application-interpreter boundary (`app`). Each request
+### Build, boot and manual testing
+
+**What this tests.** Incomplete label validation lets input cross either an OS-shell
+boundary (`os`) or an application-interpreter boundary (`app`).
+
+**Build and boot — host:**
+
+The example selects `os`; use the other suffix and `--variant app` for `app`.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe078-java-os-command-injection
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+Use `--variant app` for the application-command image.
+
+```sh
+FIXTURE_DATA=/usr/share/iotbench/java-command-fixture
+FIXTURE_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java)")")
+setpriv --reuid=991 --regid=991 --clear-groups \
+  python3 "$FIXTURE_DATA/test-java-command-fixture.py" \
+  --jdk "$FIXTURE_JDK" --jar-dir "$FIXTURE_DATA" --variant os
+echo "exit=$?"
+```
+
+`--jar-dir` tests the packaged artifacts without rebuilding corrected controls.
+The local full suite covers those controls separately. Canonical requests are
+in [requests.json](../meta-iotbench/recipes-vulns/java-command-fixture/files/requests.json).
+
+### Scenario and scope
+
+Catalog no. **39**; **2 variants** per device.
+
+Each request
 is ASCII `label=<value>` followed by LF and EOF. The intended label alphabet
 is `[A-Za-z0-9_-]{1,128}`.
 
@@ -911,7 +1148,11 @@ add `os-marker.txt` containing `JAVA_OS_MARKER` or `app-marker.txt` containing
 `JAVA_APP_MARKER`. Corrected controls reject both. The `app` JAR has no OS
 process execution; `sensor;mark` stays literal in the quoted `os` command.
 
-**Host tests — both variants, using the JDK selected in setup:**
+### Regression verification
+
+**Test — host:**
+
+Both variants, using the JDK selected in setup.
 
 ```bash
 python3 scripts/test-java-command-fixture.py --static
@@ -924,30 +1165,6 @@ The runner builds the JARs and corrected controls, checks byte-for-byte repeated
 builds, then executes in disposable namespaces. A missing isolation capability
 fails the test; it does not fall back to running directly on the host JVM.
 
-**Firmware build — repeat with the other suffix for `app`:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe078-java-os-command-injection"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**; use `--variant app` for that image:
-
-```bash
-FIXTURE_DATA=/usr/share/iotbench/java-command-fixture
-FIXTURE_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java)")")
-setpriv --reuid=991 --regid=991 --clear-groups \
-  python3 "$FIXTURE_DATA/test-java-command-fixture.py" \
-  --jdk "$FIXTURE_JDK" --jar-dir "$FIXTURE_DATA" --variant os
-echo "exit=$?"
-```
-
-`--jar-dir` tests the packaged artifacts without rebuilding corrected controls.
-The local full suite covers those controls separately. Canonical requests are
-in [requests.json](../meta-iotbench/recipes-vulns/java-command-fixture/files/requests.json).
-
 Source: [java-command-fixture](../meta-iotbench/recipes-vulns/java-command-fixture/).
 
 <a id="java-deserialization-cwe-502-with-cwe-20-contributing"></a>
@@ -955,8 +1172,41 @@ Source: [java-command-fixture](../meta-iotbench/recipes-vulns/java-command-fixtu
 
 ## Test 14: Java deserialization — CWE-502
 
-**Purpose:** an unexpected serialized class executes its reconstruction callback
-before a late type check rejects it. Input is one Java serialization stream
+### Build, boot and manual testing
+
+**What this tests.** An unexpected serialized class executes its reconstruction callback
+before a late type check rejects it.
+
+**Build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe502-java-deserialization
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+**Test — guest:**
+
+```sh
+FIXTURE_DATA=/usr/share/iotbench/java-deserialization-fixture
+FIXTURE_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java)")")
+setpriv --reuid=992 --regid=992 --clear-groups \
+  python3 "$FIXTURE_DATA/test-java-deserialization-fixture.py" \
+  --jdk "$FIXTURE_JDK" --jar-dir "$FIXTURE_DATA"
+echo "exit=$?"
+```
+
+The packaged runtime uses the same isolated harness. Root must drop to the
+fixture identity before running it. There is no network listener or dashboard.
+
+### Scenario and scope
+
+Catalog no. **42**; **1 variant** per device.
+
+Input is one Java serialization stream
 on stdin, header `AC ED 00 05`, at most 4096 bytes, followed by EOF.
 Resource limits remain enabled; the missing control is a type allowlist.
 
@@ -969,7 +1219,9 @@ Resource limits remain enabled; the missing control is a type allowlist.
 | Input over 4096 bytes | `INPUT_TOO_LARGE`, zero callback events |
 | Depth over 8, references over 32 or array length over 16 | `FILTER_REJECTED` |
 
-**Host tests:**
+### Regression verification
+
+**Test — host:**
 
 ```bash
 python3 scripts/test-java-deserialization-fixture.py --static
@@ -988,29 +1240,6 @@ measures the in-memory callback counter and compares it with the allowlist
 control. This fixture does not demonstrate arbitrary code execution or an
 external gadget chain; CWE-20 is a contributing classification of the same flaw.
 
-**Firmware build:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe502-java-deserialization"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Boot, then run in the **guest**:
-
-```bash
-FIXTURE_DATA=/usr/share/iotbench/java-deserialization-fixture
-FIXTURE_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java)")")
-setpriv --reuid=992 --regid=992 --clear-groups \
-  python3 "$FIXTURE_DATA/test-java-deserialization-fixture.py" \
-  --jdk "$FIXTURE_JDK" --jar-dir "$FIXTURE_DATA"
-echo "exit=$?"
-```
-
-The packaged runtime uses the same isolated harness. Root must drop to the
-fixture identity before running it. There is no network listener or dashboard.
-
 Source: [cwe502-java-deserialization](../meta-iotbench/recipes-vulns/cwe502-java-deserialization/).
 
 <a id="embedded-credential-pairs-over-a-unix-socket-cwe-798"></a>
@@ -1018,9 +1247,40 @@ Source: [cwe502-java-deserialization](../meta-iotbench/recipes-vulns/cwe502-java
 
 ## Extra: Embedded credential pairs — CWE-798
 
-This family is additional to the 14 catalog assignments. Each image contains
+### Build, boot and manual testing
+
+**What this tests.** Each image contains
 one active synthetic username/password pair, consumed by a private Unix-socket
 authentication service.
+
+**Build — host:**
+
+The example selects `native`; use the selected variant consistently for inspection.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-embedded-auth-native
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+**Test — host:** root is deliberately locked in these images. Use the
+[shared extraction procedure](#inspect-the-generated-firmware), then inspect:
+
+```bash
+python3 scripts/test-embedded-auth-fixture.py --isolated-fixture \
+  --rootfs "$TEST_INSPECT/rootfs" --variant native
+echo "exit=$?"
+```
+
+Expected: the selected pair and its artifact are present, with no other
+variant's credentials installed. Rootfs inspection does not execute an ARM
+ELF on an x86 host and must be recorded separately from target execution.
+
+### Scenario and scope
+
+Additional family outside the 14 catalog assignments; **8 variants** per device.
 
 | Variant | Artifact |
 | --- | --- |
@@ -1045,7 +1305,13 @@ Expected: `OK` when both fields match; `DENIED` for a wrong field or malformed
 request. Base64 must be decoded before comparison. Shell/YAML files are parsed
 as data, not executed; the connection-string variant makes no remote connection.
 
-**Host test — all eight variants:**
+Inspect the exported image offline; the root account is locked.
+
+### Regression verification
+
+**Test — host:**
+
+All eight variants.
 
 ```bash
 python3 -B scripts/test-embedded-auth-fixture.py --isolated-fixture
@@ -1054,27 +1320,5 @@ echo "exit=$?"
 
 Add `--filesystem-roundtrip` to build/extract ext4 test artifacts with
 `mke2fs` and `debugfs`. This remains a host fixture check, not a Yocto boot test.
-
-**Firmware build — native example:**
-
-```bash
-TEST_FIRMWARE="$TEST_DEVICE-cwe798-embedded-auth-native"
-FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
-  -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE=1 yocto
-echo "build_exit=$?"
-```
-
-Root is deliberately locked in these images. Extract the image using setup,
-then inspect it on the **host**:
-
-```bash
-python3 scripts/test-embedded-auth-fixture.py --isolated-fixture \
-  --rootfs "$TEST_INSPECT/rootfs" --variant native
-echo "exit=$?"
-```
-
-Expected: the selected pair and its artifact are present, with no other
-variant's credentials installed. Rootfs inspection does not execute an ARM
-ELF on an x86 host and must be recorded separately from target execution.
 
 Source: [cwe798-embedded-auth](../meta-iotbench/recipes-vulns/cwe798-embedded-auth/).

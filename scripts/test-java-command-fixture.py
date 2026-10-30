@@ -144,7 +144,8 @@ def launcher_checks():
         wrapper.write_text((ROOT / "scripts/container-build-and-export.sh").read_text().replace(
             "source /opt/yocto/yocto-env.sh", 'source "' + str(setup) + '"'))
         for firmware in ("router-cwe078-java-os-command-injection", "router-cwe077-java-app-command-injection"):
-            for options, expected in (({}, 1),
+            for options, expected in (({}, 70),
+                                      ({"IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE": "0"}, 1),
                                       ({"IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE": "1", "IOTBENCH_BUILD_MODE": "production"}, 1),
                                       ({"IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE": "1", "IOTBENCH_ENABLE_APACHE_FIXTURE": "1"}, 1),
                                       ({"IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE": "1", "IOTBENCH_BUILD_MODE": "fixture"}, 70)):

@@ -41,6 +41,7 @@ sys.exit(39)
             for recipe in recipes:
                 firmware=recipe.stem.removeprefix("iotbench-")
                 for label,changes,accepted in [
+                    ("firmware-only",{},True),
                     ("enabled",{flag:"1","IOTBENCH_BUILD_MODE":"fixture"},True),
                     ("disabled",{flag:"0","IOTBENCH_BUILD_MODE":"fixture"},False),
                     ("production",{flag:"1","IOTBENCH_BUILD_MODE":"production"},False),
@@ -86,6 +87,6 @@ with open(os.environ['DISPATCH_RESULT'],'a') as out:
                 assert row["machine"]=="qemuarm64"
                 assert len([a for a in row["argv"] if a.startswith("IOTBENCH_ENABLE_")])==1
         print("PASS bulk catalog: 33 service images opt in independently and stay excluded by default")
-        print(f"PASS {count} service dispatch cases across 33 images: explicit opt-in, production/mixed refusal and config cleanup")
+        print(f"PASS {count} service dispatch cases across 33 images: firmware selection, explicit overrides, production/mixed refusal and config cleanup")
 
 if __name__=="__main__": main()
