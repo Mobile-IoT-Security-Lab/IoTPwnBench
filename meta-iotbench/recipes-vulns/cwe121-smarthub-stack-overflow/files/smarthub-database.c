@@ -8,6 +8,12 @@
 struct request_frame {
     char bucket[64];
     volatile uint32_t authorization;
+    /* Absorbs the payload's trailing bytes: the overflow writes "ROOT" into
+     * authorization plus a NUL just past it. Without this slack the NUL lands
+     * on the saved registers behind the struct and the CGI crashes (HTTP 500)
+     * before the controlled result is produced. The out-of-bounds write past
+     * bucket[64] is still the CWE-121 overflow being demonstrated. */
+    char guard[32];
 };
 
 static void url_decode(char *dst, size_t cap, const char *src)

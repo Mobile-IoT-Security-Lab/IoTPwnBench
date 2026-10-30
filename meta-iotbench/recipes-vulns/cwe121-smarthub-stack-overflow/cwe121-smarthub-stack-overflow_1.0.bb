@@ -9,7 +9,10 @@ S = "${UNPACKDIR}"
 RDEPENDS:${PN} = "device-smarthub"
 
 do_compile() {
-    ${CC} ${CFLAGS} ${LDFLAGS} -fno-stack-protector ${S}/smarthub-database.c -o ${B}/hub-db.cgi
+    # Disable stack protector and FORTIFY so the intentional overflow is not
+    # turned into __strcpy_chk, which would abort the process (SIGABRT -> HTTP
+    # 500) instead of letting the controlled out-of-bounds write happen.
+    ${CC} ${CFLAGS} ${LDFLAGS} -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 ${S}/smarthub-database.c -o ${B}/hub-db.cgi
 }
 
 do_install() {
