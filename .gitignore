@@ -19,6 +19,3 @@ venv/
 
 # Active validation scratch data and recovery state
 /0_Data/TMP/
-
-# Test Marco
-audit-marco-2026-10-27
