@@ -5,7 +5,7 @@
 Start by choosing a device keyword and a scenario keyword below, then build and
 boot the selected firmware. Each scenario explains its manual test, inputs and
 expected results. For `permit-empty-passwords`, one shared policy check covers every device.
-This documentation update does not represent a new execution of the runtime tests.
+Execution evidence is stated separately from the test procedures.
 
 ### Common setup
 
@@ -19,8 +19,8 @@ This documentation update does not represent a new execution of the runtime test
 
 You need Docker Compose, plus QEMU and `zstd` on the host. The Python clients
 shown here require Python 3.9+; additional tools depend on the selected test.
-The SSH policy test uses native `sshd` and `ssh-keygen`. On macOS, install QEMU and zstd with
-`brew install qemu zstd`. Before the first build, or if your builder predates
+The manual SSH policy test uses the device dashboard. On macOS, install
+QEMU and zstd with `brew install qemu zstd`. Before the first build, or if your builder predates
 the Java layer, run on the host:
 
 ```bash
@@ -52,7 +52,7 @@ All scenarios listed there have a firmware recipe for each of these eleven
 devices. For a given scenario, the fixture's payloads and expected vulnerability
 signals are shared across devices; device identity, peripheral data and native
 service ports can differ. In particular, every `permit-empty-passwords` image
-uses the same SSH policy and policy validation commands.
+uses the same SSH policy and dashboard procedure.
 
 ### Build and boot any device
 
@@ -83,7 +83,7 @@ The build exports its kernel and root filesystem to
 If you already have an up-to-date export, skip the Docker command and run the
 QEMU command after setting the three variables. After boot, use the selected
 scenario's test below. For `permit-empty-passwords`, go directly to
-[Test 1](#test-1); boot is optional for this policy check.
+[Test 1](#test-1) and run the manual check in the browser.
 
 This command and the manual guides set HTTP to **18080**.
 When the selected image exposes its device dashboard, open
@@ -110,7 +110,7 @@ you close the manual instance.
 
 | Test | Scenario keyword | Where to run it | Evidence of the defect |
 | --- | --- | --- | --- |
-| [Test 1: SSH empty passwords](#test-1) | `cwe521-permit-empty-passwords` | Host / extracted firmware | Effective policy permits empty passwords; control rejects them |
+| [Test 1: SSH empty passwords](#test-1) | `cwe521-permit-empty-passwords` | Browser / guest inspection | Synthetic policy diagnostic permits an empty candidate; corrected control rejects it |
 | [Test 2: FTP write permissions](#test-2) | `cwe276-bad-write-rights` | Guest / host VM runner | Upload succeeds in the writable directory and fails in the control |
 | [Test 3: Telnet plaintext](#test-3) | `cwe798-unencrypted-traffic` | Guest / isolated host | Synthetic credentials and commands appear in plaintext |
 | [Test 4: Sudo environment](#test-4) | `cwe798-sudo-environment` | Guest | Preserved variables select the diagnostic behavior with EUID 0 |
@@ -135,6 +135,7 @@ The catalog is [Catalogo_Test_Sicurezza_Firmware_IoT.xlsm](../Catalogo_Test_Sicu
 Execution evidence belongs in [validation records](validation/). Catalog numbers
 and variant counts appear in each test's scope section.
 
+
 <a id="weakly-configured-ssh--empty-password-authentication-permitted-cwe-521"></a>
 <a id="test-1"></a>
 
@@ -142,10 +143,14 @@ and variant counts appear in each test's scope section.
 
 ### Build, boot and manual testing
 
-**What this tests.** The SSH configuration enables empty passwords, while the corrected
-policy disables them.
+**What this tests.** A dashboard diagnostic evaluates a candidate password
+against the installed SSH policy. An empty candidate is permitted by the weak
+policy and rejected by a corrected control. This is a synthetic policy check,
+not an SSH authentication service.
 
-**Build and boot — host:**
+**Build — host:**
+
+Run from the repository root, where `compose.yaml` and `scripts/` are located:
 
 ```bash
 TEST_DEVICE=router
@@ -153,77 +158,73 @@ TEST_SCENARIO=cwe521-permit-empty-passwords
 TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 
 FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+Wait for the build to finish successfully. With the default `qemuarm64`
+architecture, the final export message is:
+
+```text
+Firmware exported to deploy-images/router-cwe521-permit-empty-passwords/qemuarm64
+```
+
+**Boot — host:**
+
+After the build succeeds, run in the same host terminal:
+
+```bash
 QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-**Firmware extraction — host:**
+Wait for the guest to show `login:` and for its web service to respond. Keep QEMU running; the browser test does not require a serial-console login.
 
-Extract the selected `TEST_FIRMWARE` on the host without booting it:
+**Manual test — browser:**
 
-```bash
-TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
-TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
-mkdir "$TEST_INSPECT/rootfs" &&
-zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
-  > "$TEST_INSPECT/image.ext4" &&
-LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
-  > "$TEST_INSPECT/extraction.log" 2>&1
-echo "extract_exit=$?"
+Open <http://127.0.0.1:18080> and find the **SSH Password Policy** panel.
 
-grep -vE '^(debugfs [0-9]|(dump_file|rdump): Operation not permitted while changing ownership of )' \
-  "$TEST_INSPECT/extraction.log"
+1. Select **Installed firmware**, leave **Candidate password** empty and click
+   **Check password policy**. The output must contain:
+
+   ```text
+   diagnostic=synthetic
+   policy=firmware
+   PermitEmptyPasswords=yes
+   PasswordAuthentication=yes
+   PermitRootLogin=no
+   password_empty=yes
+   decision=POLICY_PERMITS_EMPTY_PASSWORD
+   ```
+
+2. Select **Corrected control**, keep the candidate empty and submit again.
+   Expect `PermitEmptyPasswords=no` and
+   `decision=POLICY_REJECTS_EMPTY_PASSWORD`.
+3. Enter `manual-policy-check` and submit once with each policy. Both must
+   return `password_empty=no` and
+   `decision=POLICY_PERMITS_NONEMPTY_PASSWORD`.
+4. Return to **Installed firmware**, clear the password and submit again.
+   Expect `POLICY_PERMITS_EMPTY_PASSWORD` again: the corrected control must
+   not change the installed configuration.
+
+**Expected behaviour:**
+
+| Candidate | Installed firmware | Corrected control |
+| --- | --- | --- |
+| Empty | `POLICY_PERMITS_EMPTY_PASSWORD` | `POLICY_REJECTS_EMPTY_PASSWORD` |
+| `manual-policy-check` | `POLICY_PERMITS_NONEMPTY_PASSWORD` | `POLICY_PERMITS_NONEMPTY_PASSWORD` |
+
+The empty-input difference is the observable policy defect. A permitted candidate has passed only this password-policy diagnostic; no credential is checked and no user is signed in. Submitted passwords are not echoed or saved. The corrected control changes only an in-memory copy of `PermitEmptyPasswords`.
+
+**Optional inspection — guest:** log into the QEMU serial console as `root` with password `routeradmin`, then read the backing configuration:
+
+```sh
+cat /etc/ssh/sshd_config
 ```
 
-If `debugfs` is outside `PATH`, use its installed path, commonly
-`/usr/sbin/debugfs`. Expect exit 0 and no remaining diagnostics. Ownership-only
-warnings are possible as a normal user; original ownership is not verified by
-that extracted copy. Other errors must be resolved before testing the rootfs.
-Use only this temporary tree for `--rootfs`, never the host's `/`.
-
-**Test — host:** run the check against the extracted filesystem:
-
-```bash
-python3 scripts/test-ssh-empty-passwords.py --rootfs "$TEST_INSPECT/rootfs"
-echo "exit=$?"
-```
-
-Expected: installed policy and native parser checks pass; the rootfs validator
-finds no known SSH server/startup entries or empty password fields.
-**No SSH server or empty-password account is installed. A successful SSH login
-is neither expected nor required.** Boot is optional for this policy test.
+It still contains `PermitEmptyPasswords yes`, `PasswordAuthentication yes` and `PermitRootLogin no`, including after the corrected-control requests.
 
 ### Scenario and scope
 
-Catalog no. **2**; **1 variant** per device.
+The diagnostic reads only `/etc/ssh/sshd_config` and recognizes the fixture's closed directive set. It is not a general OpenSSH configuration parser. Malformed or unexpected policy content is rejected. The selected mode and candidate cannot select a file path or change the installed policy. The fixture installs no SSH server, accounts with empty passwords or SSH startup hooks. It creates no authenticated session and adds no SSH port forwarding. Its policy result is not evidence of a successful SSH login.
 
-The installed `/etc/ssh/sshd_config` contains:
-
-```text
-PermitEmptyPasswords yes
-PasswordAuthentication yes
-PermitRootLogin no
-```
-
-Boot is optional for the SSH policy check; use the common boot commands
-only to inspect the serial console or dashboard.
-
-### Regression verification
-
-**Test — host:**
-
-```bash
-python3 scripts/test-ssh-empty-passwords.py
-echo "exit=$?"
-```
-
-Expected: policy/isolation and eleven-device source checks pass; OpenSSH
-`-t/-T` accepts both configurations and reports `permitemptypasswords yes` for
-the positive case and `no` for the control. The other two directives stay
-unchanged. Duplicate directives, `Include`, `Match` and unrelated policy changes
-are rejected by the fixture validator.
-
-Use `--sshd /path/to/sshd` to select the native parser. `--skip-openssh` runs
-only portable checks and must be recorded as skipping parser validation.
 
 Source: [cwe521-permit-empty-passwords](../meta-iotbench/recipes-vulns/cwe521-permit-empty-passwords/).
 References: [OpenSSH option](https://man.openbsd.org/sshd_config#PermitEmptyPasswords),

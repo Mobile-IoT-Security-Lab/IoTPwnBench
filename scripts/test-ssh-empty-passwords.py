@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Offline SSH fixture tests, optional OpenSSH -t/-T, and extracted-rootfs checks."""
+"""SSH policy fixture checks: offline, native OpenSSH, rootfs and optional dashboard."""
 
 import argparse
+from html.parser import HTMLParser
+import json
 from pathlib import Path
 import runpy
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE = REPO / 'meta-iotbench/recipes-vulns/cwe521-permit-empty-passwords/files'
@@ -49,9 +53,15 @@ def self_test(work):
     root = work / 'staged-rootfs'
     (root / 'etc/ssh').mkdir(parents=True)
     shutil.copyfile(positive, root / 'etc/ssh/sshd_config')
+    panel = root / 'usr/share/router-dashboard/modules/ssh-empty-password-policy/module.php'
+    panel.parent.mkdir(parents=True)
+    shutil.copyfile(MODULE / 'module.php', panel)
     (root / 'etc/passwd').write_text('root:x:0:0:root:/root:/bin/sh\n')
     (root / 'etc/shadow').write_text('root:!:0:0:99999:7:::\n')
     check(validate_rootfs(root), 'Staged rootfs validation failed')
+    panel.unlink()
+    rejected(lambda: validate_rootfs(root))
+    shutil.copyfile(MODULE / 'module.php', panel)
     (root / 'usr/sbin').mkdir(parents=True)
     for daemon in ('sshd', 'dropbear', 'sshd-session'):
         binary = root / 'usr/sbin' / daemon
@@ -130,11 +140,79 @@ def openssh_test(sshd, configs, work):
         print(f'PASS sshd -t and -T: {config.name}, permitemptypasswords {expected}')
 
 
+class DashboardTokenParser(HTMLParser):
+    token = None
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag == 'meta' and values.get('name') == 'dashboard-token':
+            self.token = values.get('content')
+
+
+def dashboard_test(base):
+    base = base.rstrip('/')
+    with urllib.request.urlopen(base + '/', timeout=15) as response:
+        page = response.read().decode()
+    token = DashboardTokenParser()
+    token.feed(page)
+    check(token.token is not None, 'Dashboard token missing')
+    check('data-action="ssh_password_policy"' in page, 'SSH policy panel missing')
+
+    def operation(payload, expected_status=200, supplied_token=None):
+        request = urllib.request.Request(
+            base + '/api.php',
+            data=json.dumps(dict(action='ssh_password_policy', **payload)).encode(),
+            headers={'Content-Type': 'application/json',
+                     'X-Dashboard-Token': token.token if supplied_token is None else supplied_token},
+        )
+        try:
+            response = urllib.request.urlopen(request, timeout=15)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result = json.load(response)
+            check(response.status == expected_status, f'Unexpected HTTP status: {result}')
+            check(result.get('ok') is (expected_status == 200), f'Unexpected result: {result}')
+        return result
+
+    for _ in range(2):
+        installed = operation({'policy': 'firmware', 'password': ''})
+        corrected = operation({'policy': 'corrected', 'password': ''})
+        check(installed['decision'] == 'POLICY_PERMITS_EMPTY_PASSWORD', 'Empty password not permitted')
+        check(installed['permitted_by_policy'] is True and installed['password_empty'] is True,
+              'Installed empty-password result mismatch')
+        check(corrected['decision'] == 'POLICY_REJECTS_EMPTY_PASSWORD', 'Corrected control failed')
+        check(corrected['permitted_by_policy'] is False and corrected['password_empty'] is True,
+              'Corrected empty-password result mismatch')
+        check('PermitEmptyPasswords=yes' in installed['output'], 'Installed policy unexpectedly changed')
+        check('PermitEmptyPasswords=no' in corrected['output'], 'Control policy not applied')
+        for result in (installed, corrected):
+            check('PasswordAuthentication=yes' in result['output'] and
+                  'PermitRootLogin=no' in result['output'], 'Other policy values changed')
+    for mode in ('firmware', 'corrected'):
+        for candidate in ('manual-policy-check-42', ' ', 'A' * 128):
+            result = operation({'policy': mode, 'password': candidate})
+            check(result['decision'] == 'POLICY_PERMITS_NONEMPTY_PASSWORD' and
+                  result['permitted_by_policy'] is True and result['password_empty'] is False,
+                  'Nonempty input was treated as empty')
+            if candidate == 'manual-policy-check-42':
+                check(candidate not in json.dumps(result), 'Candidate password leaked in result')
+    for payload in ({'policy': 'invalid'}, {'policy': []}, {'policy': None},
+                    {'password': []}, {'password': None}, {'password': 42},
+                    {'password': 'A' * 129}, {'password': 'a\0b'}):
+        operation(payload, expected_status=422)
+    operation({'password': ''}, expected_status=403, supplied_token='invalid')
+    check(operation({'password': ''})['decision'] == 'POLICY_PERMITS_EMPTY_PASSWORD',
+          'Corrected-control requests changed the active configuration')
+    print('PASS dashboard: empty/nonempty inputs, corrected control, repeated requests, limits and CSRF')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rootfs', type=Path, help='extracted generated fixture rootfs (read only)')
     parser.add_argument('--sshd', help='compatible native host sshd; auto-detected by default')
     parser.add_argument('--skip-openssh', action='store_true', help='run portable checks only')
+    parser.add_argument('--url', help='also check the read-only policy panel on a running firmware')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='iotbench-ssh-config-') as directory:
         work = Path(directory)
@@ -152,6 +230,8 @@ def main():
             openssh_test(str(Path(sshd).resolve()), configs, work)
         else:
             print('SKIP OpenSSH -t/-T: disabled or compatible host binary not available')
+        if args.url:
+            dashboard_test(args.url)
 
 
 if __name__ == '__main__':

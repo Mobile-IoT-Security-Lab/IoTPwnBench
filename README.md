@@ -236,11 +236,18 @@ for all device mappings, input flow, safeguards and expected sanitizer results.
 ### Weakly configured SSH: PermitEmptyPasswords (CWE-521)
 
 Every device has a separate `<device>-cwe521-permit-empty-passwords` synthetic
-firmware. This configuration-only fixture installs `/etc/ssh/sshd_config` with
-`PermitEmptyPasswords yes` and `PasswordAuthentication yes`, retaining
-`PermitRootLogin no`. It installs no SSH daemon or empty-password accounts.
-The image recipes exclude OpenSSH server and Dropbear packages and validate
-the root filesystem during the build. No SSH forwarding is added to QEMU.
+firmware. It installs `/etc/ssh/sshd_config` with `PermitEmptyPasswords yes`
+and `PasswordAuthentication yes`, retaining `PermitRootLogin no`.
+The **SSH Password Policy** dashboard panel reads that policy and evaluates a
+candidate password. An empty candidate is permitted by the installed policy;
+the corrected control rejects it by changing an in-memory policy copy.
+Nonempty candidates pass this policy check in both modes.
+
+This is a synthetic diagnostic, not an SSH login service. It creates no session,
+changes no configuration and does not save or echo submitted passwords.
+The images install no SSH daemon or empty-password accounts. Their recipes
+exclude OpenSSH server and Dropbear packages and validate the root filesystem
+during the build. No SSH forwarding is added to QEMU.
 
 Offline positive/negative tests and optional native OpenSSH `-t`/`-T` checks:
 
@@ -248,8 +255,14 @@ Offline positive/negative tests and optional native OpenSSH `-t`/`-T` checks:
 python3 scripts/test-ssh-empty-passwords.py
 ```
 
-Build instructions, safeguards and limitations are in
-[docs/marco-payloads.md](docs/marco-payloads.md).
+To also check the panel against an updated firmware running on loopback:
+
+```bash
+python3 scripts/test-ssh-empty-passwords.py --url http://127.0.0.1:18080
+```
+
+Build, manual browser steps, expected results and scope are in
+[Marco's Test 1](docs/marco-payloads.md#test-1).
 
 ### Weakly configured Telnet: unencrypted traffic (CWE-798/287/276)
 

@@ -53,6 +53,9 @@ def validate_rootfs(rootfs):
     check(config.is_file() and not config.is_symlink(), 'Missing regular sshd_config')
     check(config.stat().st_mode & 0o022 == 0, 'sshd_config is writable by group/others')
     check(validate_config(config), 'Missing vulnerable policy')
+    panel = root / 'usr/share/router-dashboard/modules/ssh-empty-password-policy/module.php'
+    check(panel.is_file() and not panel.is_symlink(), 'Missing regular SSH policy dashboard module')
+    check(panel.stat().st_mode & 0o022 == 0, 'SSH policy module is writable by group/others')
     for path in root.rglob('*'):
         name = path.name.lower()
         check(not (name in ('sshd', 'sshd-session', 'sshd-auth', 'dropbear',

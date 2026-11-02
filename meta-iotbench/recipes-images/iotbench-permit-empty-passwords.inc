@@ -1,4 +1,4 @@
-# Explicit opt-in, configuration-only synthetic image family.
+# SSH policy and read-only synthetic dashboard diagnostic image family.
 IOTBENCH_CWE = "CWE-521"
 IOTBENCH_VULN_INSTALL = "cwe521-permit-empty-passwords"
 
