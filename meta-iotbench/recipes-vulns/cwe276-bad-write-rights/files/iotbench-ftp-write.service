@@ -1,5 +1,5 @@
 [Unit]
-Description=Explicit synthetic FTP write-rights test (never enabled at boot)
+Description=IoTBench native FTP maintenance fixture (explicit start only)
 ConditionPathExists=/run/iotbench-ftp-write-test
 
 [Service]

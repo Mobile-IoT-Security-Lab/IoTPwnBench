@@ -261,7 +261,7 @@ To also check the panel against an updated firmware running on loopback:
 python3 scripts/test-ssh-empty-passwords.py --url http://127.0.0.1:18080
 ```
 
-Build, manual browser steps, expected results and scope are in
+Build, manual dashboard steps, expected results and scope are in
 [Marco's Test 1](docs/marco-payloads.md#test-1).
 
 ### Weakly configured Telnet: unencrypted traffic (CWE-798/287/276)
@@ -1795,11 +1795,18 @@ gateway, giving cross-domain coverage with protocol diversity (HTTP, MJPEG,
 MQTT, Modbus).
 
 
-### Synthetic vsftpd bad write rights (explicit test opt-in)
+### Native vsftpd maintenance write rights (explicit test opt-in)
 
 Each image combines one device with the shared CWE-276 permission fixture.
-Builds require an explicit test configuration; FTP runs only during a local
-private-network-namespace test. See [build, validation and limitations](docs/marco-payloads.md#weakly-configured-vsftpd-bad-write-rights).
+Both FTP directories contain the same build-time copies of device identity,
+peripherals and dashboard settings. The authenticated maintenance user can
+create a new file in `bad/`, whose directory mode is `0775`; the `0755` control
+and the corrected directory reject creation. Native vsftpd/PAM and curl perform
+real transfers; the manual procedure uses no test-runner script.
+
+Builds retain explicit fixture configuration. FTP is started manually in a private
+network namespace inside the guest. The standard daemon stays masked and no
+FTP ports are forwarded to the host. See [build, manual test and expected results](docs/marco-payloads.md#test-2).
 
 | Firmware | CWE | Scenario |
 | --- | --- | --- |

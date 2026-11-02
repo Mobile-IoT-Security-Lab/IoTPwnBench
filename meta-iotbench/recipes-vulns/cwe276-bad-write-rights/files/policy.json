@@ -27,5 +27,11 @@
       "owner": "root",
       "group": "ftpfixture"
     }
-  }
+  },
+  "export_files": [
+    "readme.txt",
+    "device.conf",
+    "peripherals.conf",
+    "settings.json"
+  ]
 }

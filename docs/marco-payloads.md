@@ -94,7 +94,7 @@ extra locks root and is inspected offline as described in its test.
 Run one firmware at a time to avoid port conflicts.
 
 Follow the selected scenario's test procedure. For example,
-`cwe276-bad-write-rights` uses the guest runner in [Test 2](#test-2): its FTP
+`cwe276-bad-write-rights` uses the manual guest commands in [Test 2](#test-2): its FTP
 service runs in a private network namespace, with no ports forwarded to the host.
 Before guest tests, wait for `login:` and sign into the serial console.
 To quit QEMU, press **Ctrl-A**, release the keys, then press **X**.
@@ -111,7 +111,7 @@ you close the manual instance.
 | Test | Scenario keyword | Where to run it | Evidence of the defect |
 | --- | --- | --- | --- |
 | [Test 1: SSH empty passwords](#test-1) | `cwe521-permit-empty-passwords` | Browser / guest inspection | Synthetic policy diagnostic permits an empty candidate; corrected control rejects it |
-| [Test 2: FTP write permissions](#test-2) | `cwe276-bad-write-rights` | Guest / host VM runner | Upload succeeds in the writable directory and fails in the control |
+| [Test 2: FTP write permissions](#test-2) | `cwe276-bad-write-rights` | Guest / native curl | Real FTP creates a file in `bad`; `control` and corrected permissions reject creation |
 | [Test 3: Telnet plaintext](#test-3) | `cwe798-unencrypted-traffic` | Guest / isolated host | Synthetic credentials and commands appear in plaintext |
 | [Test 4: Sudo environment](#test-4) | `cwe798-sudo-environment` | Guest | Preserved variables select the diagnostic behavior with EUID 0 |
 | [Test 5: Cron wildcard](#test-5) | `cwe088-cronjob-wildcard-injection` | Guest | Option-like filename selects the diagnostic; corrected control stays nominal |
@@ -143,10 +143,10 @@ and variant counts appear in each test's scope section.
 
 ### Build, boot and manual testing
 
-**What this tests.** A dashboard diagnostic evaluates a candidate password
-against the installed SSH policy. An empty candidate is permitted by the weak
-policy and rejected by a corrected control. This is a synthetic policy check,
-not an SSH authentication service.
+**What this tests.** The **SSH Password Policy** dashboard panel evaluates a
+candidate password against the installed SSH policy. An empty candidate is
+permitted by the installed policy and rejected by a corrected control.
+This is a synthetic policy diagnostic; it does not authenticate an SSH user.
 
 **Build — host:**
 
@@ -160,7 +160,11 @@ TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
 ```
 
-Wait for the build to finish successfully. With the default `qemuarm64`
+The first three assignments select the device and scenario; the last command
+builds the firmware. If an up-to-date export already exists, keep the variable
+assignments and skip the build command.
+
+Wait for a successful build before booting. With the default `qemuarm64`
 architecture, the final export message is:
 
 ```text
@@ -169,20 +173,22 @@ Firmware exported to deploy-images/router-cwe521-permit-empty-passwords/qemuarm6
 
 **Boot — host:**
 
-After the build succeeds, run in the same host terminal:
+Close any previous QEMU instance with **Ctrl-A**, then **X**. In the same host
+terminal where the variables were assigned, run:
 
 ```bash
 QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-Wait for the guest to show `login:` and for its web service to respond. Keep QEMU running; the browser test does not require a serial-console login.
+Wait for `login:` and for the web service to respond. Keep QEMU running.
+The browser test does not require a serial-console login.
 
 **Manual test — browser:**
 
-Open <http://127.0.0.1:18080> and find the **SSH Password Policy** panel.
+Open <http://127.0.0.1:18080> and scroll to **SSH Password Policy**.
 
-1. Select **Installed firmware**, leave **Candidate password** empty and click
-   **Check password policy**. The output must contain:
+1. Select **Installed firmware**, leave **Candidate password** completely empty
+   and click **Check password policy**. Expect:
 
    ```text
    diagnostic=synthetic
@@ -195,14 +201,14 @@ Open <http://127.0.0.1:18080> and find the **SSH Password Policy** panel.
    ```
 
 2. Select **Corrected control**, keep the candidate empty and submit again.
-   Expect `PermitEmptyPasswords=no` and
-   `decision=POLICY_REJECTS_EMPTY_PASSWORD`.
+   Expect `policy=corrected`, `PermitEmptyPasswords=no`, `password_empty=yes`
+   and `decision=POLICY_REJECTS_EMPTY_PASSWORD`.
 3. Enter `manual-policy-check` and submit once with each policy. Both must
    return `password_empty=no` and
    `decision=POLICY_PERMITS_NONEMPTY_PASSWORD`.
-4. Return to **Installed firmware**, clear the password and submit again.
-   Expect `POLICY_PERMITS_EMPTY_PASSWORD` again: the corrected control must
-   not change the installed configuration.
+4. Return to **Installed firmware**, clear the candidate completely and submit.
+   Expect `PermitEmptyPasswords=yes`, `password_empty=yes` and
+   `decision=POLICY_PERMITS_EMPTY_PASSWORD` again.
 
 **Expected behaviour:**
 
@@ -211,20 +217,35 @@ Open <http://127.0.0.1:18080> and find the **SSH Password Policy** panel.
 | Empty | `POLICY_PERMITS_EMPTY_PASSWORD` | `POLICY_REJECTS_EMPTY_PASSWORD` |
 | `manual-policy-check` | `POLICY_PERMITS_NONEMPTY_PASSWORD` | `POLICY_PERMITS_NONEMPTY_PASSWORD` |
 
-The empty-input difference is the observable policy defect. A permitted candidate has passed only this password-policy diagnostic; no credential is checked and no user is signed in. Submitted passwords are not echoed or saved. The corrected control changes only an in-memory copy of `PermitEmptyPasswords`.
+The empty-input difference demonstrates the policy behavior represented by the
+fixture. `PasswordAuthentication=yes` and `PermitRootLogin=no` stay unchanged
+in both modes. Returning to **Installed firmware** reproduces the original
+result because the corrected control changes only an in-memory policy copy.
 
-**Optional inspection — guest:** log into the QEMU serial console as `root` with password `routeradmin`, then read the backing configuration:
+A permitted candidate has passed only this policy diagnostic. Its value is
+not compared with an account password and it grants no access or session.
+Submitted passwords are not echoed or saved.
+
+**Optional inspection — guest:** log into the QEMU serial console as `root`
+with password `routeradmin`, then read the backing configuration:
 
 ```sh
 cat /etc/ssh/sshd_config
 ```
 
-It still contains `PermitEmptyPasswords yes`, `PasswordAuthentication yes` and `PermitRootLogin no`, including after the corrected-control requests.
+It still contains `PermitEmptyPasswords yes`, `PasswordAuthentication yes`
+and `PermitRootLogin no`, including after corrected-control requests.
 
 ### Scenario and scope
 
-The diagnostic reads only `/etc/ssh/sshd_config` and recognizes the fixture's closed directive set. It is not a general OpenSSH configuration parser. Malformed or unexpected policy content is rejected. The selected mode and candidate cannot select a file path or change the installed policy. The fixture installs no SSH server, accounts with empty passwords or SSH startup hooks. It creates no authenticated session and adds no SSH port forwarding. Its policy result is not evidence of a successful SSH login.
+The dashboard reads only `/etc/ssh/sshd_config` and recognizes the fixture's
+closed directive set. It is not a general OpenSSH configuration parser.
+Malformed or unexpected policy content is rejected. The selected mode and
+candidate cannot select a file path or change the installed policy.
 
+The fixture installs no SSH server, accounts with empty passwords or SSH startup
+hooks. It adds no SSH port forwarding. Its diagnostic result is not evidence of
+a successful SSH login.
 
 Source: [cwe521-permit-empty-passwords](../meta-iotbench/recipes-vulns/cwe521-permit-empty-passwords/).
 References: [OpenSSH option](https://man.openbsd.org/sshd_config#PermitEmptyPasswords),
@@ -237,10 +258,11 @@ References: [OpenSSH option](https://man.openbsd.org/sshd_config#PermitEmptyPass
 
 ### Build, boot and manual testing
 
-**What this tests.** An authenticated maintenance user can upload where policy permits
-only listing/download.
+**What this tests.** Native vsftpd publishes build-time copies of this device's maintenance settings to an authenticated user whose intended policy is read-only. The `bad` directory incorrectly permits creation of new files; `control` denies it. This test performs real FTP transfers with `curl` and checks the resulting files in the guest filesystem. It uses no test-runner script.
 
-**Build and boot — host:**
+**Build — host:**
+
+Run from the repository root:
 
 ```bash
 TEST_DEVICE=router
@@ -248,55 +270,91 @@ TEST_SCENARIO=cwe276-bad-write-rights
 TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 
 FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+Wait for a successful export. The named scenario selects its fixture build configuration automatically. Rebuild older exports to include the maintenance
+snapshots described below.
+
+**Boot — host:**
+
+```bash
 QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-**Test — guest:**
+**Mini test — guest, one download and two upload attempts:**
+
+This uses direct `curl` commands against native vsftpd. Here the maintenance account must authenticate, and the defect is an upload that should be denied. Run this short test or the detailed procedure below; start a fresh snapshot before  switching procedures. No firmware extraction is needed.
+
+1. Start the fixture in the guest:
+
+   ```sh
+   touch /run/iotbench-ftp-write-test
+   systemctl start iotbench-ftp-write.service
+   systemctl is-active iotbench-ftp-write.service
+   FTP_FIXTURE_PID=$(systemctl show --property=MainPID --value iotbench-ftp-write.service)
+   echo "FTP PID=$FTP_FIXTURE_PID"
+   ```
+
+   Expect `active` and a positive PID; stop if either check fails. The
+   `nsenter` prefix runs the client in the server's private network, where
+   `127.0.0.1:2121` is reachable. Luca's host endpoint is not used here.
+
+2. Download the router identity with the maintenance account:
+
+   ```sh
+   nsenter -t "$FTP_FIXTURE_PID" -n curl --fail --noproxy '*' \
+     --ftp-method nocwd --ignore-content-length --user 'ftpfixture:Fixture-FTP-Only-42' \
+     ftp://127.0.0.1:2121/bad/device.conf
+   ```
+
+   **Normal result:** the download contains `DEVICE_CLASS="router"`. Listing
+   and downloading are allowed by the maintenance policy. `nocwd` and
+   `--ignore-content-length` avoid the unsupported FTP `CWD` and `SIZE` commands.
+
+3. Create a harmless text file and try uploading it to `bad`:
+
+   ```sh
+   printf '%s\n' 'iotbench-mini-upload' > /tmp/iotbench-ftp-mini.txt
+   nsenter -t "$FTP_FIXTURE_PID" -n curl --fail --verbose --noproxy '*' \
+     --ftp-method nocwd --user 'ftpfixture:Fixture-FTP-Only-42' \
+     --upload-file /tmp/iotbench-ftp-mini.txt ftp://127.0.0.1:2121/bad/mini-probe.txt
+   echo "upload_exit=$?"
+   cat /srv/iotbench-ftp/bad/mini-probe.txt
+   stat -c '%U:%G %a' /srv/iotbench-ftp/bad/mini-probe.txt
+   ```
+
+   **Concrete defect:** FTP completes the transfer (`226`), `upload_exit=0`,
+   and the stored file contains `iotbench-mini-upload`, owned by
+   `ftpfixture:ftpfixture` with mode `600`. The account created a real file
+   despite its intended read-only access.
+
+4. Upload the same file with the same account to `control`:
+
+   ```sh
+   nsenter -t "$FTP_FIXTURE_PID" -n curl --fail --verbose --noproxy '*' \
+     --ftp-method nocwd --user 'ftpfixture:Fixture-FTP-Only-42' \
+     --upload-file /tmp/iotbench-ftp-mini.txt ftp://127.0.0.1:2121/control/mini-probe.txt
+   echo "control_exit=$?"
+   ```
+
+   **Expected control:** authentication succeeds (`230`), but file creation is rejected (`550` or `553`) and `control_exit` is nonzero. No  `/srv/iotbench-ftp/control/mini-probe.txt` is created. A connection or login failure is not evidence of correct write permissions. Both directories belong to `root:ftpfixture`; `bad` has mode `0775`, while `control` has mode `0755`.
+
+**Finish the mini test — guest:**
 
 ```sh
-python3 /usr/share/iotbench/bad-write-rights/test-guest.py --isolated-fixture
-echo "exit=$?"
+systemctl stop iotbench-ftp-write.service
+rm -f /run/iotbench-ftp-write-test /tmp/iotbench-ftp-mini.txt
+rm -f /srv/iotbench-ftp/bad/mini-probe.txt
 ```
 
-Expected: five PASS groups covering authentication, reads, uploads, boundaries
-and permissions. FTP runs only during the test in a private network namespace;
-its ports are not forwarded. vsftpd retains its privileged authentication/chroot
-broker, while uploaded files belong to the unprivileged account. This test does
-not demonstrate anonymous upload, root FTP access or command execution.
 
 ### Scenario and scope
 
-Catalog no. **6**; **1 variant** per device.
+The primary implemented weakness is **CWE-276**. The catalog also lists CWE-434 and CWE-287 as related mappings; this procedure does not demonstrate execution of an uploaded file or an authentication bypass.
 
-Account: `ftpfixture` / `Fixture-FTP-Only-42`, synthetic
-test credentials. Both directories are owned by `root:ftpfixture`:
+`vsftpd` and PAM perform the actual login and file operations. The exported files are root-owned snapshots of `/etc/iotbench/device.conf`, `/etc/iotbench/peripherals.conf` and the dashboard settings at image build time. Later dashboard edits do not refresh these FTP copies.
 
-| Operation | Expected result |
-| --- | --- |
-| `STOR bad/probe.txt`, directory mode `0775` | Upload succeeds: intended defect |
-| Same upload in `control`, mode `0755` | Rejected |
-| Upload after temporarily correcting `bad` to `0755` | Rejected |
-| Anonymous, root or wrong-password login | Rejected |
-
-### Regression verification
-
-**Test — host:**
-
-```bash
-python3 scripts/check-ftp-write-rights.py
-echo "exit=$?"
-```
-
-After closing any manually booted VM, run the automated firmware check:
-
-```bash
-python3 scripts/test-ftp-write-rights.py --device "$TEST_DEVICE"
-echo "exit=$?"
-```
-
-The runner manages QEMU and saves `/tmp/iotbench-ftp-<device>-qemu.log`.
-It uses the same `scripts/run-qemu.sh` launcher as the manual procedure.
-`--all --build` repeats the same build and test for all eleven devices.
+FTP starts only after the explicit guest marker and service-start command. The service retains its private network, chroot, unprivileged file-operation identity and restricted command set. The ordinary vsftpd service/socket remain masked, and QEMU adds no FTP forwarding for these images. Use the guest commands above; the host FTP endpoint used by Luca's anonymous scenario is not present.
 
 Source: [cwe276-bad-write-rights](../meta-iotbench/recipes-vulns/cwe276-bad-write-rights/).
 

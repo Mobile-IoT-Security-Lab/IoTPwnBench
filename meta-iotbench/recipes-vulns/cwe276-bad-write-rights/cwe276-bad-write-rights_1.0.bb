@@ -1,4 +1,5 @@
-SUMMARY = "IoTBench synthetic vsftpd bad write rights (CWE-276)"
+SUMMARY = "IoTBench native vsftpd maintenance write-rights fixture (CWE-276)"
+DESCRIPTION = "Authenticated maintenance FTP with real device snapshots and one directory-permission defect. Requires explicit test configuration and a private network namespace."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 SRC_URI = "file://LICENSE file://vsftpd.conf file://pam file://ftp-users file://readme.txt file://iotbench-ftp-write.service file://test-guest.py file://policy.json"

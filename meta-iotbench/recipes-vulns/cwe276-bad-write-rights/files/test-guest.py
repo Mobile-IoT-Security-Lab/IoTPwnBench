@@ -59,13 +59,25 @@ def client():
     with connect() as ftp:
         ftp.login('ftpfixture', 'Fixture-FTP-Only-42')
         assert {'bad', 'control'} <= set(ftp.nlst())
+        policy = json.loads(Path(__file__).with_name('policy.json').read_text())
         for directory in ('bad', 'control'):
             lines = []
             ftp.retrlines('LIST ' + directory, lines.append)
-            assert any('readme.txt' in line for line in lines)
-            data = io.BytesIO()
-            ftp.retrbinary('RETR ' + directory + '/readme.txt', data.write)
-            assert b'Uploads are prohibited by policy.' in data.getvalue()
+            for filename in policy['export_files']:
+                assert any(filename in line for line in lines), filename
+                data = io.BytesIO()
+                ftp.retrbinary('RETR ' + directory + '/' + filename, data.write)
+                content = data.getvalue()
+                assert content, filename
+                if filename == 'readme.txt':
+                    assert b'Uploads are prohibited by policy.' in content
+                elif filename == 'device.conf':
+                    assert content == Path('/etc/iotbench/device.conf').read_bytes()
+                elif filename == 'peripherals.conf':
+                    assert content == Path('/etc/iotbench/peripherals.conf').read_bytes()
+                elif filename == 'settings.json':
+                    settings = json.loads(content)
+                    assert all(key in settings for key in ('lan_ip', 'ssid', 'dhcp_start'))
         print('PASS directory listing and normal reads', flush=True)
         denied(lambda: ftp.storbinary('STOR control/probe.txt', io.BytesIO(PAYLOAD)), ('550', '553'))
         ftp.storbinary('STOR bad/probe.txt', io.BytesIO(PAYLOAD))

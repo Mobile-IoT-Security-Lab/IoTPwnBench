@@ -36,6 +36,7 @@ def check():
     assert policy['directories']['bad']['fixture_mode'] != policy['directories']['bad']['intended_mode']
     assert policy['directories']['control']['fixture_mode'] == policy['directories']['control']['intended_mode']
     assert 'STOR' in policy['prohibited_operations']
+    assert policy['export_files'] == ['readme.txt', 'device.conf', 'peripherals.conf', 'settings.json']
     recipe = (PACKAGE / 'cwe276-bad-write-rights_1.0.bb').read_text()
     for filename in re.findall(r'file://([^; "\n]+)', recipe):
         assert (FILES / filename).is_file(), filename
@@ -49,6 +50,9 @@ def check():
     guard = (LAYER / 'recipes-images/iotbench-bad-write-rights.inc').read_text()
     assert 'IOTBENCH_ENABLE_FTP_WRITE_FIXTURE ?= "0"' in guard
     assert 'bb.fatal' in guard and '/dev/null' in guard
+    assert 'iotbench_ftp_fixture_exports;' in guard
+    for filename in ('device.conf', 'peripherals.conf', 'settings.json'):
+        assert f'/srv/iotbench-ftp/$ftp_fixture_directory/{filename}' in guard, filename
     ast.parse((FILES / 'test-guest.py').read_text())
     ast.parse((ROOT / 'scripts/test-ftp-write-rights.py').read_text())
     print('PASS eleven image integrations, fixture assets, authentication, namespace and build gates')
