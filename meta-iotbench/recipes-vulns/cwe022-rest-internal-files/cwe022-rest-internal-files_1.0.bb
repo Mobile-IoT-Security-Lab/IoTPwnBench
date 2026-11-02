@@ -7,6 +7,7 @@ SRC_URI = "file://LICENSE file://NOTICE file://ground-truth.json \
 S = "${UNPACKDIR}"
 inherit python3native
 DEPENDS += "virtual/libc"
+RDEPENDS:${PN} = "curl"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_REST_FIXTURE ?= "0"
 FIXTURE_BASE = "${datadir}/iotbench/rest-internal-files"

@@ -5,7 +5,7 @@ SRC_URI = "file://LICENSE file://vsftpd.conf file://pam file://ftp-users file://
 S = "${UNPACKDIR}"
 REQUIRED_DISTRO_FEATURES = "pam systemd"
 inherit useradd features_check
-RDEPENDS:${PN} = "vsftpd libpam pam-plugin-unix python3-modules util-linux-nsenter"
+RDEPENDS:${PN} = "vsftpd libpam pam-plugin-unix python3-modules util-linux-nsenter curl"
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "--system ftpfixture"
 USERADD_PARAM:${PN} = "--system --gid ftpfixture --home-dir /srv/iotbench-ftp --no-create-home --shell /bin/false --password '\$6\$iotftpfixture\$ZtLuP9ED4aZz4B.j/q4xgCtTM83BE5ZWM0raCgY2oRr0D8p3XsmhMsNDklE9BQj8UYy4d7JCw6T9e1776NEAn0' ftpfixture"

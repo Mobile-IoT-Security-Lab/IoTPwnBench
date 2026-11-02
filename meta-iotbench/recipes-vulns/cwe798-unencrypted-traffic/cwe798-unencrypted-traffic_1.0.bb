@@ -8,7 +8,7 @@ S = "${UNPACKDIR}"
 
 inherit python3native features_check
 REQUIRED_DISTRO_FEATURES = "systemd"
-RDEPENDS:${PN} = "python3-core python3-modules"
+RDEPENDS:${PN} = "python3-core python3-modules curl tcpdump util-linux-nsenter"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_TELNET_FIXTURE ?= "0"
 

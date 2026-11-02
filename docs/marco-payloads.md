@@ -1,83 +1,31 @@
 # Marco Payloads
 
-<a id="setup"></a>
-
 ## How to use this guide
 
-Start by choosing a device keyword and a scenario from the manual test index,
-then follow its build, boot and test procedure. The fourteen numbered tests
-follow Marco's catalog assignments; embedded credentials are an additional family.
-This guide describes procedures, not a new execution of the runtime tests.
+Start by choosing a device keyword and a scenario keyword below, then build and
+boot the selected firmware. Each scenario explains its manual test, inputs and
+expected results. For `permit-empty-passwords`, one shared policy check covers every device.
+This documentation update does not represent a new execution of the runtime tests.
 
 ### Common setup
 
-- **Host**: the computer running Docker and QEMU. Open a terminal at the
-  repository root, where `compose.yaml` and `scripts/` are located.
-- **Guest**: the firmware running in QEMU. Use its serial console after
-  boot; the standard login is `root` with password `routeradmin`.
-- **Second host terminal**: use this for host checks while a manual QEMU
-  instance remains open. Close that instance before an automated runner
-  starts its own VM. Repeat the firmware and machine variable assignments
-  when opening another host terminal.
+- **Host**: the computer running Docker and QEMU. Open a terminal at the root
+  of this repository, where `compose.yaml` and `scripts/` are located.
+- **Guest**: the Linux firmware running inside QEMU. For tests marked as guest,
+  wait for `login:` in the QEMU terminal and sign in with username `root` and
+  password `routeradmin`. The password is not displayed while you type.
+- **Second host terminal**: use this for host checks and firmware inspection;
+  keep QEMU running in the first terminal during manual guest tests.
 
-`python3` must resolve to **Python 3.9+**. If necessary, replace it in host
-commands with the absolute path of a compatible interpreter.
-
-```bash
-python3 --version
-```
-
-| Checks | Additional requirements |
-| --- | --- |
-| SSH parser | Native OpenSSH `sshd` and `ssh-keygen` |
-| Native C fixtures | C compiler, Make, binutils; matching ASan/UBSan runtimes for diagnostics |
-| Connection string | SQLite development headers/library |
-| REST and C path | Linux 5.6+ with `openat2`; Unix sockets allowed |
-| Isolated runners | util-linux, working user/mount/PID/network namespaces; `ldd` for copied runtimes |
-| Telnet packet capture | `ip` from iproute2; packet capture allowed inside the test namespace |
-| Apache | Apache 2.4 with CGI modules; native Chrome/Chromium and fonts for XSS/CSRF |
-| Java | Local JDK 17+ with `java` and `javac` |
-| Firmware builds | Docker daemon access and Docker Compose |
-| Firmware boot | Matching host `qemu-system-*` executable and `zstd` |
-| Automated QEMU console | Host QEMU; Python `pexpect` where required by the runner |
-| Filesystem inspection | `zstd` and `debugfs` from e2fsprogs |
-
-Host-side namespace regressions require Linux. The firmware itself runs in QEMU.
-On macOS, install the boot tools with `brew install qemu zstd`. Before the first
-firmware build, prepare the Docker builder once:
+You need Docker Compose, plus QEMU and `zstd` on the host. The Python clients
+shown here require Python 3.9+; additional tools depend on the selected test.
+The SSH policy test uses native `sshd` and `ssh-keygen`. On macOS, install QEMU and zstd with
+`brew install qemu zstd`. Before the first build, or if your builder predates
+the Java layer, run on the host:
 
 ```bash
 docker compose build yocto
 ```
-
-For namespace-based runners, check support before testing:
-
-```bash
-unshare --user --map-root-user --mount --pid --fork --net /bin/true
-echo "exit=$?"
-```
-
-An error requires a suitable Linux environment; running the host suite as root
-is not a substitute. This probe does not cover every operation used by a runner.
-
-For Java tests, set the installed JDK directory:
-
-```bash
-IOTBENCH_JDK=/path/to/jdk-17
-"$IOTBENCH_JDK/bin/java" -version
-"$IOTBENCH_JDK/bin/javac" -version
-```
-
-Run one block at a time and check `echo "exit=$?"` immediately after each test.
-**PASS/OK + exit 0** confirms the checks that ran; **SKIP** is incomplete coverage;
-**FAIL/ERROR** requires investigation. Expected failures inside a runner are
-assessed by its final result.
-
-Record local tests, firmware builds and firmware verification separately, per
-device and variant. A passing fixture test confirms the intended weakness and
-its controls. Dashboard availability alone does not verify the weakness.
-Keep logs, artifact hashes and skipped checks with the validation record.
-This guide describes procedures, not a claim that every image was tested.
 
 ### Device keywords
 
@@ -97,8 +45,14 @@ Use the exact keyword from this table when selecting a firmware:
 | Health monitor | `healthmonitor` |
 | Door lock | `doorlock` |
 
-The firmware ID is `<device-keyword>-<scenario-keyword>`. Every scenario has
-a recipe for each listed device; variant tables select distinct images.
+The firmware ID is `<device-keyword>-<scenario-keyword>`, for example
+`router-cwe521-permit-empty-passwords` or `doorlock-cwe521-permit-empty-passwords`.
+Choose the scenario keyword from the [manual test index](#manual-test-index).
+All scenarios listed there have a firmware recipe for each of these eleven
+devices. For a given scenario, the fixture's payloads and expected vulnerability
+signals are shared across devices; device identity, peripheral data and native
+service ports can differ. In particular, every `permit-empty-passwords` image
+uses the same SSH policy and policy validation commands.
 
 ### Build and boot any device
 
@@ -106,9 +60,6 @@ Run the following commands in the same host terminal at the repository root.
 Change only `TEST_DEVICE` and `TEST_SCENARIO` to select a different firmware,
 then rerun the block. The default architecture is `qemuarm64`; for another
 supported architecture, set `YOCTO_MACHINE` consistently for build and boot.
-
-Docker compiles the firmware; QEMU boots the exported image. These are the two
-consecutive steps of this workflow.
 
 On **Apple Silicon**, you can accelerate `qemuarm64` boots by running these
 commands in the host terminal before the boot commands:
@@ -131,18 +82,29 @@ The build exports its kernel and root filesystem to
 `deploy-images/<device-keyword>-<scenario-keyword>/<machine>/`.
 If you already have an up-to-date export, skip the Docker command and run the
 QEMU command after setting the three variables. After boot, use the selected
-scenario's test below. For SSH empty passwords, go directly to [Test 1](#test-1).
-Run the boot command only if the build succeeded.
+scenario's test below. For `permit-empty-passwords`, go directly to
+[Test 1](#test-1); boot is optional for this policy check.
 
-Wait for `login:` and sign into the guest console with `root` / `routeradmin`.
-Run one firmware at a time. To quit QEMU, press **Ctrl-A**, release, then **X**.
-Guest writes are normally discarded when QEMU exits.
+This command and the manual guides set HTTP to **18080**.
+When the selected image exposes its device dashboard, open
+<http://127.0.0.1:18080>; always use the port printed by the launcher.
+Apache, native path/buffer/connection/symlink and Java fixtures use the serial
+console and have no dashboard or forwarded network port. The embedded-auth
+extra locks root and is inspected offline as described in its test.
+Run one firmware at a time to avoid port conflicts.
 
-When the image exposes its device dashboard, open <http://127.0.0.1:18080>.
-For a remote host, forward that port to your workstation. Apache, native
-path/buffer/connection/symlink and Java fixtures use the serial console and
-have no dashboard or forwarded network port. The embedded-auth extra locks
-root and is inspected offline as described in its test.
+Follow the selected scenario's test procedure. For example,
+`cwe276-bad-write-rights` uses the guest runner in [Test 2](#test-2): its FTP
+service runs in a private network namespace, with no ports forwarded to the host.
+Before guest tests, wait for `login:` and sign into the serial console.
+To quit QEMU, press **Ctrl-A**, release the keys, then press **X**.
+The launcher normally uses a disposable snapshot.
+
+For CLI tests, run `echo "exit=$?"` **immediately after** the command you want to
+check. A status of `0` means success, but the specific output described in each
+guide confirms the defect. `INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE`
+messages are expected notices. Scripts that boot QEMU themselves must run after
+you close the manual instance.
 
 ### Manual test index
 
@@ -173,32 +135,6 @@ The catalog is [Catalogo_Test_Sicurezza_Firmware_IoT.xlsm](../Catalogo_Test_Sicu
 Execution evidence belongs in [validation records](validation/). Catalog numbers
 and variant counts appear in each test's scope section.
 
-<a id="inspect-the-generated-firmware"></a>
-
-**Firmware extraction — host:**
-
-For tests using `--rootfs`, extract the selected `TEST_FIRMWARE` without booting:
-
-```bash
-TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
-TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
-mkdir "$TEST_INSPECT/rootfs" &&
-zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
-  > "$TEST_INSPECT/image.ext4" &&
-LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
-  > "$TEST_INSPECT/extraction.log" 2>&1
-echo "extract_exit=$?"
-
-grep -vE '^(debugfs [0-9]|(dump_file|rdump): Operation not permitted while changing ownership of )' \
-  "$TEST_INSPECT/extraction.log"
-```
-
-If `debugfs` is outside `PATH`, use its installed path, commonly
-`/usr/sbin/debugfs`. Expect exit 0 and no remaining diagnostics. Ownership-only
-warnings are possible as a normal user; original ownership is not verified by
-that extracted copy. Other errors must be resolved before testing the rootfs.
-Use only this temporary tree for `--rootfs`, never the host's `/`.
-
 <a id="weakly-configured-ssh--empty-password-authentication-permitted-cwe-521"></a>
 <a id="test-1"></a>
 
@@ -220,8 +156,31 @@ FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
 QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-**Test — host:** extract the image using the
-[shared extraction procedure](#inspect-the-generated-firmware), then run:
+**Firmware extraction — host:**
+
+Extract the selected `TEST_FIRMWARE` on the host without booting it:
+
+```bash
+TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
+TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
+mkdir "$TEST_INSPECT/rootfs" &&
+zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
+  > "$TEST_INSPECT/image.ext4" &&
+LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
+  > "$TEST_INSPECT/extraction.log" 2>&1
+echo "extract_exit=$?"
+
+grep -vE '^(debugfs [0-9]|(dump_file|rdump): Operation not permitted while changing ownership of )' \
+  "$TEST_INSPECT/extraction.log"
+```
+
+If `debugfs` is outside `PATH`, use its installed path, commonly
+`/usr/sbin/debugfs`. Expect exit 0 and no remaining diagnostics. Ownership-only
+warnings are possible as a normal user; original ownership is not verified by
+that extracted copy. Other errors must be resolved before testing the rootfs.
+Use only this temporary tree for `--rootfs`, never the host's `/`.
+
+**Test — host:** run the check against the extracted filesystem:
 
 ```bash
 python3 scripts/test-ssh-empty-passwords.py --rootfs "$TEST_INSPECT/rootfs"
@@ -582,7 +541,31 @@ Expected: `accepted`/0, then `rejected`/1. That manual negative exit 1 is expect
 Repeat build and image verification for each selected variant; a local suite
 covering all variants does not verify all generated images.
 
-**Check — host:** use the [shared extraction procedure](#inspect-the-generated-firmware), then verify:
+**Firmware extraction — host:**
+
+Extract the selected `TEST_FIRMWARE` on the host without booting it:
+
+```bash
+TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
+TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
+mkdir "$TEST_INSPECT/rootfs" &&
+zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
+  > "$TEST_INSPECT/image.ext4" &&
+LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
+  > "$TEST_INSPECT/extraction.log" 2>&1
+echo "extract_exit=$?"
+
+grep -vE '^(debugfs [0-9]|(dump_file|rdump): Operation not permitted while changing ownership of )' \
+  "$TEST_INSPECT/extraction.log"
+```
+
+If `debugfs` is outside `PATH`, use its installed path, commonly
+`/usr/sbin/debugfs`. Expect exit 0 and no remaining diagnostics. Ownership-only
+warnings are possible as a normal user; original ownership is not verified by
+that extracted copy. Other errors must be resolved before testing the rootfs.
+Use only this temporary tree for `--rootfs`, never the host's `/`.
+
+**Check — host:** verify the extracted filesystem:
 
 ```bash
 python3 scripts/test-password-leak-fixture.py --isolated-fixture \
@@ -1265,8 +1248,33 @@ TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
 ```
 
-**Test — host:** root is deliberately locked in these images. Use the
-[shared extraction procedure](#inspect-the-generated-firmware), then inspect:
+Root is deliberately locked in these images; inspect the exported firmware offline.
+
+**Firmware extraction — host:**
+
+Extract the selected `TEST_FIRMWARE` on the host without booting it:
+
+```bash
+TEST_MACHINE="${YOCTO_MACHINE:-qemuarm64}"
+TEST_INSPECT=$(mktemp -d /tmp/iotbench-inspect.XXXXXX) &&
+mkdir "$TEST_INSPECT/rootfs" &&
+zstd -dc "deploy-images/$TEST_FIRMWARE/$TEST_MACHINE/iotbench-$TEST_FIRMWARE-$TEST_MACHINE.rootfs.ext4.zst" \
+  > "$TEST_INSPECT/image.ext4" &&
+LC_ALL=C debugfs -R "rdump / $TEST_INSPECT/rootfs" "$TEST_INSPECT/image.ext4" \
+  > "$TEST_INSPECT/extraction.log" 2>&1
+echo "extract_exit=$?"
+
+grep -vE '^(debugfs [0-9]|(dump_file|rdump): Operation not permitted while changing ownership of )' \
+  "$TEST_INSPECT/extraction.log"
+```
+
+If `debugfs` is outside `PATH`, use its installed path, commonly
+`/usr/sbin/debugfs`. Expect exit 0 and no remaining diagnostics. Ownership-only
+warnings are possible as a normal user; original ownership is not verified by
+that extracted copy. Other errors must be resolved before testing the rootfs.
+Use only this temporary tree for `--rootfs`, never the host's `/`.
+
+**Test — host:** inspect the extracted filesystem:
 
 ```bash
 python3 scripts/test-embedded-auth-fixture.py --isolated-fixture \
