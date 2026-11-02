@@ -112,7 +112,7 @@ you close the manual instance.
 | --- | --- | --- | --- |
 | [Test 1: SSH empty passwords](#test-1) | `cwe521-permit-empty-passwords` | Browser / guest inspection | Synthetic policy diagnostic permits an empty candidate; corrected control rejects it |
 | [Test 2: FTP write permissions](#test-2) | `cwe276-bad-write-rights` | Guest / native curl | Real FTP creates a file in `bad`; `control` and corrected permissions reject creation |
-| [Test 3: Telnet plaintext](#test-3) | `cwe798-unencrypted-traffic` | Guest / isolated host | Synthetic credentials and commands appear in plaintext |
+| [Test 3: Telnet plaintext](#test-3) | `cwe798-unencrypted-traffic` | Guest / native Telnet and tcpdump | System login succeeds; packet capture exposes the password and device settings |
 | [Test 4: Sudo environment](#test-4) | `cwe798-sudo-environment` | Guest | Preserved variables select the diagnostic behavior with EUID 0 |
 | [Test 5: Cron wildcard](#test-5) | `cwe088-cronjob-wildcard-injection` | Guest | Option-like filename selects the diagnostic; corrected control stays nominal |
 | [Test 6: Password leak](#test-6) | `cwe798-password-leak-<variant>` | Guest / extracted firmware | Recovered synthetic credential is accepted; wrong value is rejected |
@@ -365,10 +365,16 @@ Source: [cwe276-bad-write-rights](../meta-iotbench/recipes-vulns/cwe276-bad-writ
 
 ### Build, boot and manual testing
 
-**What this tests.** A synthetic Telnet session exposes fixed credentials and commands
-in plaintext.
+**What this tests.** A maintenance operator logs into the firmware through native
+BusyBox `telnetd` and `/bin/login`, then reads the device's actual configuration.
+`tcpdump` records the TCP session: the login password, shell commands and returned
+configuration travel without encryption. Authentication uses a real, unprivileged
+system account and `/etc/shadow`; no Python server or predefined command responses
+are used.
 
-**Build and boot — host:**
+**Build — host:**
+
+Run from the repository root, where `compose.yaml` and `scripts/` are located:
 
 ```bash
 TEST_DEVICE=router
@@ -376,59 +382,143 @@ TEST_SCENARIO=cwe798-unencrypted-traffic
 TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
 
 FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+Wait for a successful export. Rebuild older images: they contain the former
+simulated service. Selecting this scenario enables the native BusyBox daemon
+automatically; the native `telnet` client, `tcpdump` and `nsenter` are installed
+in the guest.
+
+**Boot — host, in the same terminal:**
+
+```bash
 QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
 ```
 
-**Test — guest:**
+Wait for `login:` in the QEMU serial console and sign in as `root` with password
+`routeradmin`. Keep QEMU running. The following steps all run in that **guest
+console**; no browser, host Telnet connection or firmware extraction is needed.
 
-```sh
-python3 /usr/share/iotbench/unencrypted-traffic/test-session.py \
-  --installed --isolated-fixture --require-pcap \
-  --pcap /tmp/iotbench-telnet.pcap --transcript /tmp/iotbench-telnet-wire.json
-echo "exit=$?"
-```
+**Manual test — guest:**
 
-`STATUS`, `HELP` and `QUIT` return fixed responses. This is a synthetic service,
-not an OS login daemon: other inputs cannot execute commands or start a shell.
-No Telnet port is forwarded to the host.
+1. Start the native daemon and obtain its PID:
+
+   ```sh
+   touch /run/iotbench-telnet-test
+   systemctl start iotbench-telnet.service
+   systemctl is-active iotbench-telnet.service
+   TELNET_PID=$(systemctl show --property=MainPID --value iotbench-telnet.service)
+   echo "Telnet PID=$TELNET_PID"
+   ```
+
+   Expect `active` and a positive PID. Stop if either check fails. The service
+   has its own network namespace; `nsenter -t "$TELNET_PID" -n` places the
+   capture tool and client in that same network, where `127.0.0.1:2323` is reachable.
+
+2. Start the packet capture in the background, then open the Telnet connection:
+
+   ```sh
+   nsenter -t "$TELNET_PID" -n tcpdump -i lo -nn -s 0 -U -Z root \
+     -w /tmp/iotbench-telnet.pcap 'tcp port 2323' &
+   CAPTURE_PID=$!
+   sleep 1
+   nsenter -t "$TELNET_PID" -n telnet 127.0.0.1 2323
+   ```
+
+   Wait for `tcpdump` to report `listening on lo`. At the Telnet `login:` prompt,
+   press **Ctrl-]**, release the keys, then press **l** (lowercase L) to select
+   **go to line mode** from BusyBox's escape menu. This sends each entered line
+   together, making the capture easier to read. Type `maintenance` and press
+   Enter. At `Password:`, type `Maintenance-Telnet-42` and press Enter. Enter each
+   value only after its prompt. Line mode may echo the password locally; the
+   packet capture is the evidence of network disclosure.
+
+3. In the **Telnet maintenance shell**, enter these real commands one at a time:
+
+   ```sh
+   id
+   cat /etc/iotbench/device.conf
+   exit
+   ```
+
+   Expect a nonzero UID belonging to `maintenance`. For this router image, the
+   configuration contains `DEVICE_NAME="Edge One"` and `DEVICE_CLASS="router"`.
+   `exit` closes the maintenance shell and returns to the guest root console.
+
+4. Back in the **guest root console**, stop and inspect the capture:
+
+   ```sh
+   kill -INT "$CAPTURE_PID"
+   wait "$CAPTURE_PID"
+   tcpdump -nn -A -r /tmp/iotbench-telnet.pcap 'tcp dst port 2323'
+   tcpdump -nn -A -r /tmp/iotbench-telnet.pcap 'tcp src port 2323'
+   ```
+
+   The first command shows **client-to-server** traffic: find
+   `Maintenance-Telnet-42` and `cat /etc/iotbench/device.conf` in packets whose
+   destination is `127.0.0.1.2323`. The second shows **server-to-client** traffic:
+   find the returned device settings. The lab banner also contains the public
+   password; that banner alone is not evidence that the submitted password was
+   sent in cleartext. Telnet negotiation bytes and TCP headers can appear as
+   unreadable characters. These are real packets, with no decryption or
+   generated transcript.
+
+5. Check normal authentication rejection, then stop the service:
+
+   ```sh
+   nsenter -t "$TELNET_PID" -n telnet 127.0.0.1 2323
+   ```
+
+   Enter `maintenance` at `login:` and `wrong-password` at `Password:`. Expect
+   `Login incorrect` and no maintenance shell. In this second session, keep
+   the client's default character mode. Press **Ctrl-]**, release the keys,
+   then press **e** to leave the client and return to the guest root console:
+
+   ```sh
+   systemctl stop iotbench-telnet.service
+   rm /run/iotbench-telnet-test
+   ```
+
+**Expected behaviour:**
+
+| Check | Expected result |
+| --- | --- |
+| Correct maintenance credentials | A real shell running as `maintenance`, with a nonzero UID |
+| Read device settings | Actual `/etc/iotbench/device.conf` content, matching the selected device |
+| Wrong password | `Login incorrect`; no maintenance shell |
+| Inspect captured TCP traffic | Submitted password and command readable toward port 2323; device settings readable in the reply |
+
+Successful authentication and a configuration read establish normal operation.
+The concrete defect is the readable password and configuration in the packet
+capture. A successful login alone does not prove this transport defect.
 
 ### Scenario and scope
 
-Catalog no. **9**; **1 variant** per device.
+Catalog no. **9**, **Weakly configured Telnet / Unencrypted traffic**, owned by
+Marco; **1 variant** per device. Change only `TEST_DEVICE` to select another of
+the eleven device recipes. Configuration contents and numeric UIDs can differ.
 
-The expected pair is `telnet-fixture` /
-`Fixture-Telnet-Only-42`. The weak policy also accepts another nonempty username
-with that password; the strict username/password control rejects it.
-The policy file is mode `0666`; the permission control changes it to `0644`.
+The catalog associates CWE-798/287/276 with this scenario. The native procedure
+demonstrates plaintext transport (**CWE-319**) and uses a fixed lab password
+(**CWE-798**). It does not demonstrate an authentication bypass or a writable
+authentication policy: those simulated behaviors have been removed.
 
-### Regression verification
+The daemon starts only after the explicit runtime marker and service-start
+command. It listens on guest loopback in a private network namespace, and QEMU
+forwards no Telnet port. The authenticated maintenance shell is unprivileged;
+the service mounts the firmware filesystem read-only and uses a private `/tmp`.
+The account password is stored as a SHA-512 crypt hash in `/etc/shadow`.
 
-**Test — host:**
+### Validation performed
 
-```bash
-python3 scripts/test-telnet-unencrypted-traffic.py --static
-echo "exit=$?"
-python3 scripts/test-telnet-unencrypted-traffic.py --local --isolated-fixture \
-  --transcript /tmp/iotbench-telnet-wire.json
-echo "exit=$?"
-```
-
-The JSON transcript is not a packet capture. For actual PCAP evidence:
-
-```bash
-unshare --user --map-root-user --net /bin/bash -c '
-  ip link set lo up &&
-  exec python3 scripts/test-telnet-unencrypted-traffic.py \
-    --local --isolated-fixture --require-pcap \
-    --pcap /tmp/iotbench-telnet-isolated.pcap \
-    --transcript /tmp/iotbench-telnet-isolated-wire.json
-'
-echo "exit=$?"
-```
-
-Expected: synthetic credentials and commands are readable without decryption;
-normal behavior and strict controls pass. The loopback-only run skips the
-non-loopback interface check, which the ordinary local run covers.
+On **2026-11-02**, `router-cwe798-unencrypted-traffic` was built and exported for
+`qemuarm64`, then booted in QEMU. The interactive commands above confirmed
+`uid=994(maintenance)`, the actual router settings, the submitted password and
+command in client-to-server TCP payloads, and `Login incorrect` for the wrong
+password. The capture reported 58 packets and zero kernel drops. The service
+was inactive before explicit startup and after cleanup; its private network
+namespace and `ProtectSystem=strict` were also inspected. The other ten device
+recipes were checked statically; they were not built or booted in this update.
 
 Source: [cwe798-unencrypted-traffic](../meta-iotbench/recipes-vulns/cwe798-unencrypted-traffic/).
 

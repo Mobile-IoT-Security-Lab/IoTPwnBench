@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""Validate Telnet source integration, build gates, staged sessions or an extracted rootfs."""
+"""Offline native Telnet integration/build checks; runtime testing is manual in QEMU."""
 
 import argparse
-import ast
 import json
-import os
 from pathlib import Path
 import runpy
-import stat
 import tempfile
 import textwrap
 
@@ -18,8 +15,11 @@ if not LAYER.is_dir():
 SLUG = 'cwe798-unencrypted-traffic'
 SOURCE = LAYER / 'recipes-vulns' / SLUG / 'files'
 BUILD = runpy.run_path(str(SOURCE / 'fixture-build.py'))
-TEST = runpy.run_path(str(SOURCE / 'test-session.py'))
-check = TEST['check']
+
+
+def check(condition, message):
+    if not condition:
+        raise AssertionError(message)
 
 
 def rejected(action):
@@ -51,31 +51,32 @@ def integration():
     common = (recipes / 'iotbench-unencrypted-traffic.inc').read_text()
     check('IOTBENCH_VULN_INSTALL = "' + SLUG + '"' in common, 'Wrong scenario package')
     truth = json.loads((SOURCE / 'ground-truth.json').read_text())
-    check(truth['primary_cwe'] == 'CWE-798' and truth['related_cwes'] == ['CWE-287', 'CWE-276']
-          and truth['single_scenario'] is True, 'Incorrect single-scenario ground truth')
-    service_source = (SOURCE / 'fixture-telnet.py').read_text()
-    tree = ast.parse(service_source)
-    imports = {item.names[0].name for item in ast.walk(tree) if isinstance(item, ast.Import)}
-    check(imports == {'argparse', 'json', 'signal', 'socket', 'time'}, 'Unexpected service modules')
-    for symbol, value in (('FIXTURE_USER', truth['username']), ('FIXTURE_PASSWORD', truth['password']),
-                          ('LOOPBACK', '127.0.0.1')):
-        matches = [node.value.s for node in tree.body if isinstance(node, ast.Assign)
-                   and any(isinstance(target, ast.Name) and target.id == symbol for target in node.targets)]
-        check(matches == [value], 'Missing hard-coded fixture symbol ' + symbol)
-    check('listener.bind((LOOPBACK, arguments.port))' in service_source, 'Unfixed bind address')
-    check('return bool(username) and password == FIXTURE_PASSWORD' in service_source,
-          'CWE-287 password-only sink not found')
+    check(truth['demonstrated_cwes'] == ['CWE-319', 'CWE-798']
+          and truth['account_privileged'] is False, 'Incorrect native-service ground truth')
     unit = (SOURCE / 'iotbench-telnet.service').read_text()
-    for expected in ('User=nobody', 'PrivateNetwork=yes', 'NoNewPrivileges=yes',
+    for expected in ('/telnetd -F -b 127.0.0.1:2323 -l /bin/login', 'PrivateNetwork=yes',
                      'ConditionPathExists=/run/iotbench-telnet-test', 'Restart=no',
-                     'ProtectSystem=strict', 'RestrictAddressFamilies=AF_INET'):
+                     'ProtectSystem=strict', 'RestrictAddressFamilies=AF_INET AF_UNIX',
+                     'CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_SETUID CAP_SETGID'):
         check(expected in unit, 'Missing unit safeguard ' + expected)
     check('[Install]' not in unit, 'Fixture must not have boot enablement')
-    print('PASS static CWE evidence, service isolation and all {} device recipes'.format(len(devices)), flush=True)
+    busybox = LAYER / 'recipes-core/busybox'
+    fragment = (busybox / 'files/iotbench-telnet.cfg').read_text()
+    for setting in ('CONFIG_TELNET=y', 'CONFIG_TELNETD=y', 'CONFIG_FEATURE_TELNETD_STANDALONE=y'):
+        check(setting in fragment.splitlines(), 'Missing native applet: ' + setting)
+    append = (busybox / 'busybox_%.bbappend').read_text()
+    check("d.getVar('IOTBENCH_ENABLE_TELNET_FIXTURE') == '1'" in append
+          and "d.getVar('IOTBENCH_BUILD_MODE') == 'fixture'" in append,
+          'BusyBox Telnet config must require opt-in and fixture mode')
+    print('PASS native Telnet integration, service isolation and all {} device recipes'.format(len(devices)), flush=True)
 
     # Exercise both actual recipe Python guard bodies with minimal metadata stubs.
     # This is an offline policy check, not a claim that BitBake has parsed a build.
     package = LAYER / 'recipes-vulns' / SLUG / (SLUG + '_1.0.bb')
+    package_text = package.read_text()
+    for expected in ('inherit python3native features_check useradd', '--shell /bin/sh',
+                     '--gid maintenance', 'busybox curl tcpdump util-linux-nsenter'):
+        check(expected in package_text, 'Missing native-login dependency/account: ' + expected)
     package_code = recipe_python(package, '__anonymous')
     image_code = recipe_python(recipes / 'iotbench-unencrypted-traffic.inc', 'iotbench_telnet_fixture_guard')
 
@@ -122,23 +123,32 @@ def integration():
                 rejected(lambda: BUILD['stage'](invalid_output, mode, enabled, machine))
         check(not invalid_output.exists(), 'Rejected build wrote fixture files')
     print('PASS shared build policy and both recipe guards: production, opt-in and machine matrix (offline)', flush=True)
+    with tempfile.TemporaryDirectory(prefix='iotbench-telnet-stage-') as temporary:
+        root = Path(temporary)
+        BUILD['stage'](root, 'fixture', '1', 'qemuarm64', target_paths=True)
+        staged = root / 'usr/lib/systemd/system/iotbench-telnet.service'
+        check('ExecStart=/usr/sbin/telnetd ' in staged.read_text(), 'Native daemon path not rendered')
+        check(not (root / 'usr/bin/fixture-telnet').exists(), 'Simulated daemon was staged')
+    print('PASS native service staging (does not compile or execute BusyBox)', flush=True)
 
 
 def inspect_rootfs(root):
     root = Path(root)
     data = root / 'usr/share/iotbench/unencrypted-traffic'
-    auth = root / 'etc/iotbench/telnet-auth.json'
-    helper = root / 'usr/bin/fixture-telnet'
-    check(stat.S_IMODE(auth.stat().st_mode) == 0o666, 'Missing intentional CWE-276 mode')
-    check(json.loads(auth.read_text()) == json.loads((SOURCE / 'telnet-auth.json').read_text()),
-          'Wrong installed authentication policy')
-    check(stat.S_IMODE(helper.stat().st_mode) == 0o755, 'Incorrect service executable mode')
     build = json.loads((data / 'build-config.json').read_text())
     BUILD['validate_build'](build['mode'], '1' if build['enabled'] is True else '0', build['machine'])
-    check('Path(\'/usr/share/iotbench/unencrypted-traffic\')' in helper.read_text(),
-          'Rootfs contains host-staged paths')
-    for name in ('NOTICE', 'LICENSE', 'ground-truth.json', 'test-session.py'):
+    for name in ('NOTICE', 'LICENSE', 'ground-truth.json'):
         check((data / name).read_bytes() == (SOURCE / name).read_bytes(), 'Installed asset differs: ' + name)
+    for obsolete in ('usr/bin/fixture-telnet', 'etc/iotbench/telnet-auth.json'):
+        check(not (root / obsolete).exists(), 'Obsolete simulated service installed: ' + obsolete)
+    passwd = (root / 'etc/passwd').read_text().splitlines()
+    account = next(line.split(':') for line in passwd if line.startswith('maintenance:'))
+    check(int(account[2]) != 0 and account[-1] == '/bin/sh', 'Maintenance account must be unprivileged')
+    shadow = (root / 'etc/shadow').read_text().splitlines()
+    credential = next(line.split(':')[1] for line in shadow if line.startswith('maintenance:'))
+    check(credential.startswith('$6$iottelnet$') and credential in
+          (LAYER / 'recipes-vulns' / SLUG / (SLUG + '_1.0.bb')).read_text().replace('\\$', '$'),
+          'Installed maintenance credential differs from recipe')
     units = list((root / 'usr/lib/systemd/system').glob('iotbench-telnet.service'))
     units += list((root / 'lib/systemd/system').glob('iotbench-telnet.service'))
     check(units, 'Missing disabled unit')
@@ -148,33 +158,18 @@ def inspect_rootfs(root):
     for base in (root / 'etc/systemd/system', root / 'usr/lib/systemd/system', root / 'lib/systemd/system'):
         for entry in base.glob('*.wants/iotbench-telnet.service'):
             raise AssertionError('Unexpected boot link: ' + str(entry))
-    print('PASS extracted rootfs service, test build manifest, assets, permissions and disabled startup', flush=True)
+    print('PASS extracted rootfs native-login account, assets and disabled startup (offline)', flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     choice = parser.add_mutually_exclusive_group(required=True)
     choice.add_argument('--static', action='store_true')
-    choice.add_argument('--local', action='store_true')
     choice.add_argument('--rootfs', type=Path)
-    parser.add_argument('--isolated-fixture', action='store_true')
-    parser.add_argument('--pcap', type=Path)
-    parser.add_argument('--require-pcap', action='store_true')
-    parser.add_argument('--transcript', type=Path)
     arguments = parser.parse_args()
-    if arguments.local and not arguments.isolated_fixture:
-        parser.error('--local requires explicit --isolated-fixture')
-    if not arguments.local and (arguments.pcap or arguments.require_pcap or arguments.transcript):
-        parser.error('Traffic options require --local')
     integration()
     if arguments.rootfs:
         inspect_rootfs(arguments.rootfs)
-    if arguments.local:
-        with tempfile.TemporaryDirectory(prefix='iotbench-telnet-local-') as temporary:
-            root = Path(temporary)
-            root.chmod(0o755)
-            BUILD['stage'](root, 'fixture', '1', 'qemuarm64')
-            TEST['run_tests'](root, arguments.pcap, arguments.require_pcap, arguments.transcript)
 
 
 if __name__ == '__main__':

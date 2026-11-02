@@ -1,6 +1,8 @@
-INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
-One weakly configured Telnet scenario: CWE-798, CWE-287, CWE-276.
-Public synthetic credentials: telnet-fixture / Fixture-Telnet-Only-42.
-Loopback only. Plaintext authentication and predefined data. No OS shell.
+INTENTIONALLY INSECURE TELNET LAB — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
+Native BusyBox telnetd, system login and an unprivileged maintenance shell.
+Public lab credentials: maintenance / Maintenance-Telnet-42.
+Plaintext transport (CWE-319) and a fixed lab account password (CWE-798).
+Loopback only, inside a private network namespace; no host port forwarding.
 Build requires explicit fixture mode and opt-in on supported QEMU targets.
-Runtime requires --fixture-test. One connection; finite lifetime; no boot startup.
+Runtime requires an explicit marker and service start; no boot startup.
+The former simulated username bypass and writable JSON policy are not installed.

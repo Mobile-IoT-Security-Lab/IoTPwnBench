@@ -1,5 +1,5 @@
-# One weakly configured Telnet scenario; related CWEs describe the same service.
-IOTBENCH_CWE = "CWE-798 CWE-287 CWE-276"
+# Retain the catalog scenario ID; native login uses normal account authentication.
+IOTBENCH_CWE = "CWE-319 CWE-798"
 IOTBENCH_VULN_INSTALL = "cwe798-unencrypted-traffic"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_TELNET_FIXTURE ?= "0"
@@ -14,11 +14,8 @@ do_rootfs[prefuncs] += "iotbench_telnet_fixture_guard"
 ROOTFS_POSTPROCESS_COMMAND += "iotbench_telnet_fixture_metadata; "
 
 iotbench_telnet_fixture_metadata() {
-    if [ "$(stat -c '%u:%g:%a' '${IMAGE_ROOTFS}${sysconfdir}/iotbench/telnet-auth.json')" != "0:0:666" ]; then
-        bbfatal "Telnet authentication policy must exhibit the documented root:root 0666 fixture condition"
-    fi
-    if [ "$(stat -c '%u:%g:%a' '${IMAGE_ROOTFS}${bindir}/fixture-telnet')" != "0:0:755" ]; then
-        bbfatal "Telnet helper must be ordinary root:root 0755"
-    fi
+    test -L ${IMAGE_ROOTFS}${sbindir}/telnetd || test -x ${IMAGE_ROOTFS}${sbindir}/telnetd || bbfatal "Native Telnet daemon is missing"
+    test -L ${IMAGE_ROOTFS}/bin/login || test -x ${IMAGE_ROOTFS}/bin/login || bbfatal "System login is missing"
+    grep -q '^maintenance:' ${IMAGE_ROOTFS}${sysconfdir}/shadow || bbfatal "Maintenance account is missing"
     cat ${IMAGE_ROOTFS}${datadir}/iotbench/unencrypted-traffic/NOTICE >> ${IMAGE_ROOTFS}${sysconfdir}/motd
 }

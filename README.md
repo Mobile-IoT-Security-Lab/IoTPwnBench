@@ -267,21 +267,21 @@ Build, manual dashboard steps, expected results and scope are in
 ### Weakly configured Telnet: unencrypted traffic (CWE-798/287/276)
 
 All eleven devices have an opt-in `<device>-cwe798-unencrypted-traffic` image.
-One synthetic Telnet service combines fixed public credentials, a password-only
-identity check and a world-writable authentication policy. It binds only
-`127.0.0.1`, returns predefined responses and never starts an OS shell.
+Native BusyBox `telnetd` uses system login for the unprivileged `maintenance`
+account. A manual configuration read and TCP capture expose the password and
+actual device settings in plaintext (CWE-319). The fixed public lab password
+also represents CWE-798; the catalog's CWE-287/276 simulations are no longer installed.
 
 ```bash
 python3 scripts/test-telnet-unencrypted-traffic.py --static
-python3 scripts/test-telnet-unencrypted-traffic.py --local --isolated-fixture
 FIRMWARE=router-cwe798-unencrypted-traffic docker compose run --rm \
   -e IOTBENCH_ENABLE_TELNET_FIXTURE=1 yocto
 ```
 
 Production/default build configurations cannot resolve the fixture package.
 The catalog builder skips these images unless explicitly opted in. No Telnet
-port forwarding or boot enablement is added. Packet-capture tests, build gates
-and guest instructions are in
+port forwarding or boot enablement is added. The daemon binds only to loopback
+inside a private network namespace. Manual login, packet capture and expected results are in
 [docs/marco-payloads.md](docs/marco-payloads.md#weakly-configured-telnet--unencrypted-traffic-cwe-798287276).
 
 ### Bad SUDO Rights: allow changes to environment variables (CWE-798)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dedicated host test build; production/default configurations are rejected."""
+"""Stage native Telnet unit/metadata only; this does not compile a host daemon."""
 
 from pathlib import Path
 import runpy

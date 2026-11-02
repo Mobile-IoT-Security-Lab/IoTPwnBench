@@ -1,16 +1,12 @@
 [Unit]
-Description=IoTBench synthetic plaintext Telnet fixture (CWE-798/287/276)
+Description=IoTBench native Telnet maintenance login (explicit start only)
 ConditionPathExists=/run/iotbench-telnet-test
 
 [Service]
 Type=simple
-User=nobody
-Group=nogroup
-ExecStart=@BINDIR@/fixture-telnet --fixture-test
+ExecStart=@SBINDIR@/telnetd -F -b 127.0.0.1:2323 -l /bin/login
 Restart=no
-RuntimeMaxSec=30
 LimitCORE=0
-NoNewPrivileges=yes
 PrivateNetwork=yes
 PrivateTmp=yes
 ProtectSystem=strict
@@ -18,6 +14,9 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET
-CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+# login changes PTY ownership and switches to the authenticated account.
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_SETUID CAP_SETGID
+RestrictSUIDSGID=yes
+LockPersonality=yes
 UMask=0077
