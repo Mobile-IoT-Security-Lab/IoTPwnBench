@@ -38,8 +38,8 @@ class FixtureTests(unittest.TestCase):
         events = RUNNER['run_once'](self.root, secure)
         self.assertEqual(events, [json.loads(line) for line in log.read_text().splitlines()])
         self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
-        self.assertEqual(events[0], {'context': 'simulated-privileged-maintenance',
-                                     'actual_privilege_change': False})
+        self.assertEqual(events[0], {'context': 'root-cron-maintenance',
+                                     'cron_runas': 'root', 'helper_changes_uid': False})
         return events
 
     def invoke(self, args, cwd=None):

@@ -308,14 +308,9 @@ Build, boot and direct manual commands are in
 
 ### Cronjob wildcard injection (CWE-88/78/269)
 
-The opt-in `<device>-cwe088-cronjob-wildcard-injection` scenario covers all eleven
-device profiles. An inert cron configuration expands inbox filenames into a
-native diagnostic-only helper's arguments. An option-like filename selects a
-fixed diagnostic; the secure `--` control treats it as an operand. The privileged
-role is simulated, with no shell execution, UID change or real cron daemon.
+The opt-in `<device>-cwe088-cronjob-wildcard-injection` scenario covers all eleven device profiles. A real root-run CrOniE entry invokes a shell command that expands inbox filenames into a native diagnostic-only helper's arguments once per minute. An option-like filename selects a fixed diagnostic; the secure `--` control treats it as an operand. The helper performs no command execution, UID change or operand read.
 
 ```bash
-python3 scripts/test-cron-wildcard-fixture.py --isolated-fixture
 FIRMWARE=router-cwe088-cronjob-wildcard-injection docker compose run --rm \
   -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE=1 yocto
 ```

@@ -59,7 +59,7 @@ int main(int argc, char **argv)
     }
     unsigned options = 0, operands = 0;
     int separated = 0, diagnostic = 0;
-    puts("{\"context\":\"simulated-privileged-maintenance\",\"actual_privilege_change\":false}");
+    puts("{\"context\":\"root-cron-maintenance\",\"cron_runas\":\"root\",\"helper_changes_uid\":false}");
     for (int i = 2; i < argc; ++i) {
         if (!separated && strcmp(argv[i], "--") == 0) {
             separated = 1;

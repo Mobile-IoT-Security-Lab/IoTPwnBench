@@ -29,6 +29,10 @@ iotbench_cron_wildcard_fixture_metadata() {
         fi
     done
     if [ "$(stat -c '%u:%g:%a' "$fixture_root/inbox")" != "988:988:750" ]; then
-        bbfatal "Only fixturefiles may write the dedicated cron fixture inbox"
+        bbfatal "Cron fixture inbox must retain its fixturefiles-only non-root write boundary"
+    fi
+    cron_entry='${IMAGE_ROOTFS}${sysconfdir}/cron.d/iotbench-cron-wildcard-injection'
+    if [ "$(stat -c '%u:%g:%a' "$cron_entry")" != "0:0:644" ]; then
+        bbfatal "Cron wildcard schedule must retain ordinary root-owned permissions"
     fi
 }

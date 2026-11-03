@@ -1,15 +1,16 @@
 SUMMARY = "IoTBench synthetic cron wildcard argument injection (CWE-88)"
-DESCRIPTION = "One inert test cron schedule and a diagnostic-only native helper. Related modeled boundaries: CWE-78 and CWE-269. Explicit fixture builds only."
+DESCRIPTION = "One real, root-run cron schedule executes a shell command whose wildcard expands fixture inbox filenames into a diagnostic-only native helper. Related modeled boundaries: CWE-78 and CWE-269. Explicit fixture builds only."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 SRC_URI = "file://LICENSE file://NOTICE file://ground-truth.json \
            file://fixture-maintenance.c file://fixture-build.py file://fixture-runner.py \
-           file://vulnerable.crontab.in file://secure.crontab.in"
+           file://vulnerable.crontab.in file://secure.crontab.in \
+           file://iotbench-cron-wildcard-injection.cron"
 S = "${UNPACKDIR}"
 
 inherit useradd python3native
 DEPENDS += "virtual/libc"
-RDEPENDS:${PN} = "python3-core python3-modules"
+RDEPENDS:${PN} = "python3-core python3-modules cronie"
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "--system --gid 988 fixturefiles"
 USERADD_PARAM:${PN} = "--system --uid 988 --gid fixturefiles --home-dir /nonexistent --no-create-home --shell /bin/false --password '!' fixturefiles"
@@ -43,10 +44,15 @@ do_install() {
         --binary ${B}/fixture-maintenance --datadir '${datadir}' \
         --mode '${IOTBENCH_BUILD_MODE}' \
         --enable '${IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE}' --machine '${MACHINE}'
+    install -d ${D}${sysconfdir}/cron.d
+    install -m 0644 ${S}/iotbench-cron-wildcard-injection.cron \
+        ${D}${sysconfdir}/cron.d/iotbench-cron-wildcard-injection
     chown fixturefiles:fixturefiles ${D}${FIXTURE_ROOT}/inbox
     chown fixturefiles:fixturefiles ${D}${FIXTURE_ROOT}/inbox/*.record
 }
 
-# Everything, including the ELF, inert crontabs and logs, stays in one tree.
-# No cron dependency, startup hook, sudo rule, capabilities or setuid executable.
-FILES:${PN} = "${FIXTURE_ROOT}"
+# The parser-only helper and its reference controls stay in one fixture tree.
+# CrOniE consumes one root-owned schedule from /etc/cron.d; there is no sudo
+# rule, capability, setuid executable, network listener or command execution.
+FILES:${PN} = "${FIXTURE_ROOT} \
+               ${sysconfdir}/cron.d/iotbench-cron-wildcard-injection"

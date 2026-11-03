@@ -1,0 +1,4 @@
+# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - NOT FOR DEPLOYMENT
+# CrOniE invokes a shell that expands the bare wildcard in the controlled inbox as root.
+# The helper is parser-only: option-like filenames select its fixed diagnostic.
+* * * * * root cd /usr/share/iotbench/cronjob-wildcard-injection/inbox && /usr/share/iotbench/cronjob-wildcard-injection/bin/fixture-maintenance --fixture-test * >> /usr/share/iotbench/cronjob-wildcard-injection/logs/cron-vulnerable.jsonl 2>&1

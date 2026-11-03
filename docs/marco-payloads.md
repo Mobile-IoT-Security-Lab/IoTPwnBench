@@ -309,3 +309,253 @@ Successful authentication and a configuration read establish normal operation. T
 > ⚠️ **Disclaimer:** Intentionally insecure lab fixture; not for deployment. Demonstrates **CWE-319/798**, not catalog mappings CWE-287/276. Explicit startup, guest loopback, a private network and read-only firmware filesystem contain the service; QEMU forwards no Telnet port.
 
 Source: [cwe798-unencrypted-traffic](../meta-iotbench/recipes-vulns/cwe798-unencrypted-traffic/).
+
+<a id="bad-sudo-rights--allow-changes-to-environment-variables-cwe-798"></a>
+<a id="test-4"></a>
+
+## Test 4: Bad SUDO Rights — allow changes to environment variables — CWE-798
+
+### Build, boot and manual testing
+
+**What this tests.** The locked `fixtureenv` account may run an exact native
+maintenance report through `sudo`. Its policy resets the environment but
+explicitly keeps `POSIXLY_CORRECT`. The real BusyBox `du` then changes the
+implicit report unit from 1024 to 512 bytes when that preserved variable is
+set. The report reads the selected firmware's installed `/etc/iotbench`
+directory; no helper, fixed response, or file mutation is involved.
+
+**Build — host:**
+
+Run from the repository root:
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-sudo-environment
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+Wait for a successful export. Selecting this scenario activates its required
+fixture build mode and opt-in through the existing builder. Rebuild an older
+export before testing it.
+
+**Boot — host:**
+
+```bash
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+At the QEMU serial console, log in as `root` with password `routeradmin`. Run
+the following commands in that **guest console**. The outer `sudo -u
+fixtureenv` only starts the locked fixture account from the root test console;
+the inner `sudo` is the restricted privileged operation being tested.
+
+**Manual test — guest:**
+
+1. Confirm that the permitted maintenance command runs as root:
+
+   ```sh
+   sudo -n -u fixtureenv -- /usr/bin/sudo -n /usr/bin/id -u
+   echo "identity_exit=$?"
+   ```
+
+   Expected: `0`, then `identity_exit=0`. This proves that the inner command
+   reached the policy-authorized root execution path.
+
+2. Run the normal, environment-free baseline:
+
+   ```sh
+   unset POSIXLY_CORRECT
+   sudo -n -u fixtureenv -- /usr/bin/sudo -n /usr/bin/du -s /etc/iotbench
+   echo "baseline_exit=$?"
+   ```
+
+   For the router image, expect `3 /etc/iotbench` and `baseline_exit=0`.
+
+3. Supply the one preserved environment variable before invoking the same
+   authorized report:
+
+   ```sh
+   sudo -n -u fixtureenv -- /usr/bin/env POSIXLY_CORRECT=1 \
+     /usr/bin/sudo -n /usr/bin/du -s /etc/iotbench
+   echo "environment_exit=$?"
+   ```
+
+   For the router image, expect `6 /etc/iotbench` and
+   `environment_exit=0`. The directory is unchanged, but the implicit unit is
+   now 512 bytes, so the numeric report is exactly twice the baseline.
+
+4. Keep the environment input but select `du`'s explicit 1024-byte-unit
+   control:
+
+   ```sh
+   sudo -n -u fixtureenv -- /usr/bin/env POSIXLY_CORRECT=1 \
+     /usr/bin/sudo -n /usr/bin/du -sk /etc/iotbench
+   echo "control_exit=$?"
+   ```
+
+   Expected for the router: `3 /etc/iotbench` and `control_exit=0`. Thus the
+   changed value in step 3 is caused by the preserved environment variable,
+   not by a different directory or changed allocation. Other device images can
+   have a different baseline count, but their environment-sensitive count must
+   be exactly twice that baseline and their `-sk` control must return it.
+
+Repeat steps 2–4 without changing the guest: their three counts remain in the
+same baseline/doubled/baseline relation. Quit QEMU with **Ctrl-A**, then **X**.
+
+### Scenario and scope
+
+**⚙️ Implementation.** `/etc/sudoers.d/iotbench-sudo-environment` uses
+`env_reset`, `!setenv`, and an allowlist containing only
+`POSIXLY_CORRECT`. It grants `fixtureenv` three exact root commands:
+`/usr/bin/id -u`, `/usr/bin/du -s /etc/iotbench`, and
+`/usr/bin/du -sk /etc/iotbench`. The real `/usr/bin/du` is the BusyBox applet
+installed in the firmware; the device configuration directory is provided by
+the selected device profile.
+
+**✅ Verification.** A root identity, an environment-free baseline, the
+preserved-variable result, and the explicit-unit control are all required.
+For `router`, the observable sequence is `3`, `6`, `3`; the same relation is
+the acceptance criterion for every supported device profile.
+
+> ⚠️ **Disclaimer:** Intentionally insecure lab fixture; not for deployment.
+> It demonstrates environment influence on a restricted privileged report, not
+> arbitrary root execution, changed disk allocation, or hardcoded credentials.
+> `CWE-798` is retained as the historical catalog label.
+
+Source: [cwe798-sudo-environment](../meta-iotbench/recipes-vulns/cwe798-sudo-environment/).
+
+<a id="cronjob-wildcard-injection-cwe-8878269"></a>
+<a id="test-5"></a>
+
+## Test 5: Vulnerable cronjob configurations — Cronjob wildcard injection — CWE-88/78/269
+
+### Build, boot and manual testing
+
+**What this tests.** A real root-run CrOniE job invokes a shell command that
+changes into a dedicated, fixturefiles-writable inbox and passes a bare `*` to
+a parser-only native maintenance helper. A filename beginning with `-` is
+therefore interpreted as an option. The fixed `--` form treats the identical
+filename as an operand.
+
+**Build — host:**
+
+Run from the repository root:
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe088-cronjob-wildcard-injection
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+Wait for a successful export. Selecting this scenario enables its required
+fixture build mode and opt-in through the existing builder. Rebuild any older
+export: it contains the former inert schedule.
+
+**Boot — host:**
+
+```bash
+QEMU_HTTP_PORT=18080 FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+At the QEMU serial console, log in as `root` with password `routeradmin`. Run
+the following commands in that **guest console**. The guest root console is
+used only to reproduce the local lab fixture; the input file itself is created
+by the restricted `fixturefiles` account.
+
+**Manual test — guest:**
+
+1. Confirm that the image contains the active cron configuration and daemon:
+
+   ```sh
+   CRON_ROOT=/usr/share/iotbench/cronjob-wildcard-injection
+   test -f /etc/cron.d/iotbench-cron-wildcard-injection
+   grep -F -- '--fixture-test *' /etc/cron.d/iotbench-cron-wildcard-injection
+   systemctl is-active crond.service
+   ```
+
+   Expected: the second command prints the root schedule with its bare `*`,
+   and the last command prints `active`. Do not continue if either check fails.
+
+2. Run the normal baseline with only the two installed `.record` names:
+
+   ```sh
+   rm -f "$CRON_ROOT/inbox/--fixture-diagnostic" \
+     "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   sleep 70
+   cat "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   ```
+
+   Expected: the log names `alpha.record` and `beta.record` as `operand`s and
+   ends with `"options":0,"operands":2,"result":"nominal"`. The 70-second
+   wait crosses a real one-minute cron tick.
+
+3. Create the concrete option-like filename as the only non-root writer, then
+   let the next cron execution consume it:
+
+   ```sh
+   su -s /bin/sh fixturefiles -c \
+     'touch -- /usr/share/iotbench/cronjob-wildcard-injection/inbox/--fixture-diagnostic'
+   stat -c '%U:%G %a %n' "$CRON_ROOT/inbox/--fixture-diagnostic"
+   rm -f "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   sleep 70
+   cat "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   ```
+
+   Expected: `stat` reports `fixturefiles:fixturefiles`; the fresh cron log
+   contains `"kind":"option","argument":"--fixture-diagnostic"` and ends
+   with `"options":1,"operands":2,"result":"synthetic-diagnostic"`. This
+   differs from the baseline solely because the filename crossed the cron
+   wildcard-to-argument boundary.
+
+4. Run the exact secure command form against the unchanged inbox:
+
+   ```sh
+   (
+     cd "$CRON_ROOT/inbox" || exit
+     "$CRON_ROOT/bin/fixture-maintenance" --fixture-test -- *
+   ) > "$CRON_ROOT/logs/secure-control.jsonl"
+   cat "$CRON_ROOT/logs/secure-control.jsonl"
+   ```
+
+   Expected: the same `--fixture-diagnostic` value is an `operand`, not an
+   `option`, and the final result is `"options":0,"operands":3,"result":"nominal"`.
+   This is the command stored in the package's secure cron control.
+
+5. To check repeatability, remove only the vulnerable log, wait one more tick
+   and inspect its final event:
+
+   ```sh
+   rm -f "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   sleep 70
+   tail -n 1 "$CRON_ROOT/logs/cron-vulnerable.jsonl"
+   ```
+
+   Expected: the result remains `synthetic-diagnostic` while the option-like
+   filename remains in the inbox. Quit QEMU with **Ctrl-A**, then **X**.
+
+### Scenario and scope
+
+**⚙️ Implementation.** The shared package installs `cronie`, a root-owned
+`0644` schedule at `/etc/cron.d/iotbench-cron-wildcard-injection`, and a
+root-owned diagnostic helper. `fixturefiles` (UID/GID 988) is the sole intended
+non-root writer of the dedicated `0750` inbox. CrOniE runs the vulnerable
+command as root once per minute; the helper itself only classifies argument
+strings and emits JSON. It does not read operand contents, execute commands,
+change UID, write files, listen on a network, or provide a remote entry point.
+
+**✅ Verification.** Evidence requires the active CrOniE service and installed
+schedule, a normal baseline, the option result after the concrete filename is
+created by `fixturefiles`, the `--` control, and a repeated scheduled result.
+The log is produced by the actual cron command, not by the legacy Python
+emulator.
+
+> ⚠️ **Disclaimer:** Intentionally insecure lab fixture; not for deployment.
+> It demonstrates filename-to-option injection in a controlled cron job, not
+> shell command execution, privilege escalation, persistence outside the
+> disposable QEMU image, or access to any non-fixture data.
+
+Source: [cwe088-cronjob-wildcard-injection](../meta-iotbench/recipes-vulns/cwe088-cronjob-wildcard-injection/).

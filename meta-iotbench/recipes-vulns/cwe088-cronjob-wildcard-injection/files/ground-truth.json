@@ -8,14 +8,15 @@
   "user": "fixturefiles",
   "uid": 988,
   "inbox_mode": "0750",
-  "schedule": "*/5 * * * *",
-  "simulated_runas": "root",
-  "actual_privilege_change": false,
+  "schedule": "* * * * *",
+  "live_crontab": "/etc/cron.d/iotbench-cron-wildcard-injection",
+  "cron_runas": "root",
+  "helper_changes_uid": false,
   "vulnerable_arguments": ["--fixture-test", "*"],
   "secure_arguments": ["--fixture-test", "--", "*"],
   "boundary_filename": "--fixture-diagnostic",
   "vulnerable_result": "synthetic-diagnostic",
   "secure_result": "nominal",
-  "data_flow": "fixturefiles creates/renames inbox filename -> bare * in cron cwd -> expanded argv -> option branch in fixture-maintenance.c -> predefined stdout diagnostic",
-  "limitations": "The runner emulates the fixed cron command and wildcard expansion without a shell, daemon or UID transition. CWE-78 and CWE-269 describe the modeled command/privilege boundary; no command execution or privilege escalation is implemented. File contents are never read."
+  "data_flow": "fixturefiles creates/renames inbox filename -> CrOniE invokes the root cron.d shell command -> bare * expands in the inbox cwd -> option branch in fixture-maintenance.c -> predefined stdout diagnostic",
+  "limitations": "The helper only parses glob-expanded argument strings and itself writes no files. CWE-78 and CWE-269 describe the modeled command/privilege boundary; no command execution or privilege escalation is implemented. File contents are never read."
 }

@@ -1,3 +1,4 @@
-# TEST ONLY: inert configuration, never install in a system cron directory.
-# The root run-as field is a simulated role; the runner never changes UID.
+# TEST ONLY: offline reference schedule for fixture-runner.py.
+# The live schedule is /etc/cron.d/iotbench-cron-wildcard-injection; this
+# root field is simulated only by the reference runner.
 */5 * * * * root cd @INBOX@ && @HELPER@ --fixture-test *
