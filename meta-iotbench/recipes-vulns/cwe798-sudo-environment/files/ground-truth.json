@@ -1,21 +1,28 @@
 {
   "scenario": "Bad SUDO Rights - Allow Changes to Environment Variables",
+  "catalog_number": 12,
   "catalog_cwe": "CWE-798",
   "single_scenario": true,
   "package": "cwe798-sudo-environment",
   "user": "fixtureenv",
   "uid": 989,
-  "helper": "/usr/bin/fixture-sudo-env",
-  "arguments": ["--fixture-test"],
   "runas": "root",
   "sudoers": "/etc/sudoers.d/iotbench-sudo-environment",
-  "environment_allowlist": ["FIXTURE_MODE", "FIXTURE_CONFIG", "TEST_PROFILE"],
-  "credential_symbol": "FIXTURE_PASSWORD",
-  "synthetic_password": "Fixture-Sudo-Only-42",
-  "credential_scope": "fixed synthetic diagnostic response only; no OS or production authentication",
-  "source": "fixture-sudo-env.c",
-  "data_flow": "sudo env_keep -> getenv -> fixed string comparisons -> predefined stdout diagnostics",
-  "default_result": "nominal",
-  "modified_result": "synthetic-diagnostic",
-  "limitations": "Environment-policy weakness is distinct from CWE-798; the catalog association is represented by the hard-coded diagnostic credential in the same workflow."
+  "environment_allowlist": [
+    "POSIXLY_CORRECT"
+  ],
+  "commands": [
+    "/usr/bin/du -s /etc/iotbench",
+    "/usr/bin/du -sk /etc/iotbench",
+    "/usr/bin/id -u"
+  ],
+  "data": "Installed device configuration directory /etc/iotbench; measured filesystem allocation",
+  "normal_unit_bytes": 1024,
+  "environment_selected_unit_bytes": 512,
+  "control_unit_bytes": 1024,
+  "expected_relation": "On the same unchanged directory, POSIXLY_CORRECT=1 doubles du -s's numeric count; du -sk restores the baseline",
+  "mutates_device_files": false,
+  "python_runtime_runner": false,
+  "synthetic_responses": false,
+  "limitations": "This shows real environment influence on a privileged report, not arbitrary execution or privilege escalation. The historical CWE-798 label is not demonstrated; no hardcoded diagnostic credential is installed."
 }

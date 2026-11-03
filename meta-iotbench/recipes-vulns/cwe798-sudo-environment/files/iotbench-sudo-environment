@@ -1,8 +1,6 @@
-# INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE. Never deploy.
-# Sole defect: a low-privileged caller controls these diagnostic settings.
-# NOSETENV keeps -E and unlisted command-line assignments forbidden.
+# Native maintenance disk-usage report. No helper script or simulated response.
+# Only the native unit-selection variable is preserved.
 Defaults:fixtureenv env_reset, !setenv
-Defaults:fixtureenv env_keep = "FIXTURE_MODE FIXTURE_CONFIG TEST_PROFILE"
-Defaults:fixtureenv !env_check
-Defaults:fixtureenv secure_path = "@BINDIR@:@BASE_BINDIR@"
-fixtureenv ALL=(root) NOPASSWD: NOSETENV: @BINDIR@/fixture-sudo-env --fixture-test
+Defaults:fixtureenv env_keep = "POSIXLY_CORRECT"
+Defaults:fixtureenv secure_path = "@BASE_BINDIR@"
+fixtureenv ALL=(root) NOPASSWD: NOSETENV: @BASE_BINDIR@/du -s /etc/iotbench, @BASE_BINDIR@/du -sk /etc/iotbench, @BASE_BINDIR@/id -u

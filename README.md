@@ -284,40 +284,27 @@ port forwarding or boot enablement is added. The daemon binds only to loopback
 inside a private network namespace. Manual login, packet capture and expected results are in
 [docs/marco-payloads.md](docs/marco-payloads.md#weakly-configured-telnet--unencrypted-traffic-cwe-798287276).
 
-### Bad SUDO Rights: allow changes to environment variables (CWE-798)
+### Bad SUDO Rights: allow changes to environment variables (catalog CWE-798)
 
-Each device has a separate opt-in sudo environment fixture. The locked synthetic
-user `fixtureenv` can run only `fixture-sudo-env --fixture-test` as root, with
-three synthetic environment variables preserved. The native C helper returns
-fixed diagnostics, including one gated by a public hard-coded test credential.
-It cannot execute commands or load user-selected files or libraries.
-
-| Firmware id | CWE | Single scenario |
-| --- | --- | --- |
-| `doorlock-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `envsensor-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `healthmonitor-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `ipcamera-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `plc-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `router-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `smartbulb-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `smarthub-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `smartplug-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `smartspeaker-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
-| `thermostat-cwe798-sudo-environment` | CWE-798 | Synthetic sudo environment policy |
+All eleven `<device>-cwe798-sudo-environment` images now use native BusyBox
+`du` on the real installed `/etc/iotbench` directory. The locked `fixtureenv`
+account has an exact sudo rule for the maintenance report. Preserving
+`POSIXLY_CORRECT=1` changes implicit units from 1024 to 512 bytes, doubling the
+numeric count without changing the files. The permitted `du -sk` control
+restores explicit 1024-byte units. `id -u` checks the execution identity.
 
 ```bash
-python3 scripts/test-sudo-env-fixture.py --static
-python3 scripts/test-sudo-env-fixture.py --local --isolated-fixture
-FIRMWARE=router-cwe798-sudo-environment docker compose run --rm \
-  -e IOTBENCH_ENABLE_SUDO_ENV_FIXTURE=1 yocto
+FIRMWARE=router-cwe798-sudo-environment docker compose run --rm yocto
 ```
 
-The catalog builder skips this family unless opted in. Production/default
-configuration cannot provide its package. Real sudo-policy VM tests, guest
-tests, expected responses and the distinction between the environment-policy
-defect and its CWE-798 credential association are documented in
-[Marco's payload notes](docs/marco-payloads.md#bad-sudo-rights--allow-changes-to-environment-variables-cwe-798).
+The former fixed-response C helper, diagnostic password and runtime runner
+are removed. Rebuild older images. Production/default configurations still
+exclude this opt-in lab. The historical CWE-798 ID is retained for catalog
+traceability; this report-unit check does not demonstrate hardcoded credentials,
+arbitrary root execution or a change in actual disk allocation.
+
+Build, boot and direct manual commands are in
+[Marco's Test 4](docs/marco-payloads.md#test-4).
 
 ### Cronjob wildcard injection (CWE-88/78/269)
 

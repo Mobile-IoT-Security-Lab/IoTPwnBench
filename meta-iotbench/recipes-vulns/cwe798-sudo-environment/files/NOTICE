@@ -1,6 +1,8 @@
-INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE — LOCAL SECURITY TESTING ONLY — NOT FOR DEPLOYMENT
-Bad SUDO Rights – Allow Changes to Environment Variables (CWE-798 catalog association).
-Public diagnostic password: Fixture-Sudo-Only-42. This is not an OS credential.
-Only fixtureenv may invoke the fixed helper as root with --fixture-test.
-No daemon, shell, arbitrary command, library loading or user-selected file access.
-Requires explicit test build configuration and a disposable isolated environment.
+IOTBENCH NATIVE SUDO MAINTENANCE LAB
+The locked fixtureenv account may run only fixed du and id commands as root.
+du reads the installed /etc/iotbench directory; no generated test data is used.
+POSIXLY_CORRECT changes implicit du units from 1024 to 512 bytes.
+The explicit du -k control keeps output in 1024-byte units.
+No command execution payload, arbitrary pathname, policy editing or Python test client is needed.
+The historical cwe798 firmware ID is retained for catalog traceability.
+This report-unit test does not demonstrate a hardcoded-password vulnerability or privilege escalation.
