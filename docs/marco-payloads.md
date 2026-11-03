@@ -559,3 +559,154 @@ emulator.
 > disposable QEMU image, or access to any non-fixture data.
 
 Source: [cwe088-cronjob-wildcard-injection](../meta-iotbench/recipes-vulns/cwe088-cronjob-wildcard-injection/).
+
+<a id="password-leak--different-file-types-and-patterns-cwe-798"></a>
+<a id="test-6"></a>
+
+## Test 6: Password Leak — Different File Types and Patterns — CWE-798
+
+### Build, boot and manual testing
+
+**What this tests.** Each image deliberately installs one synthetic
+credential-bearing file and a native local consumer. The consumer rereads the
+selected installed file, extracts its configured field, and compares one stdin
+candidate. It does not source or execute fixture data, create an account, start
+a service, or contact a network.
+
+**Build — host:**
+
+Run from the repository root:
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-password-leak-conf-password
+TEST_FIRMWARE="$TEST_DEVICE-$TEST_SCENARIO"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture \
+  -e IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=1 yocto
+```
+
+Both explicit variables are required: production/catalog builds cannot resolve
+this package. Replace `router` with any [device keyword](#device-keywords) to
+build the same variant for another supported device profile.
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+At the serial console, log in as `root` with password `routeradmin`. Run all
+remaining commands in the **guest**. This is a local filesystem fixture; no
+Python command or test-runner script is used.
+
+**Manual test — guest:**
+
+1. Inspect the leaked file and native consumer:
+
+   ```sh
+   FIXTURE_ROOT=/usr/share/iotbench/password-leak/conf-password
+   stat -c '%U:%G %a %n' "$FIXTURE_ROOT/auth.conf" "$FIXTURE_ROOT/fixture-auth"
+   cat "$FIXTURE_ROOT/auth.conf"
+   ```
+
+   Expected: `auth.conf` is `root:root 644`, `fixture-auth` is
+   `root:root 755`, and the file contains `password=FIXTURE_PASSWORD_001`.
+
+2. Send a normal incorrect candidate:
+
+   ```sh
+   printf '%s\n' 'wrong-value' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+   echo "baseline_exit=$?"
+   ```
+
+   Expected: `synthetic-auth: rejected` and `baseline_exit=1`.
+
+3. Use the concrete credential recovered from the installed file:
+
+   ```sh
+   printf '%s\n' 'FIXTURE_PASSWORD_001' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+   echo "recovered_exit=$?"
+   ```
+
+   Expected: `synthetic-auth: accepted` and `recovered_exit=0`.
+
+4. Confirm that the consumer requires that source file, then restore it
+   immediately:
+
+   ```sh
+   mv "$FIXTURE_ROOT/auth.conf" "$FIXTURE_ROOT/auth.conf.off"
+   printf '%s\n' 'FIXTURE_PASSWORD_001' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+   echo "source_control_exit=$?"
+   mv "$FIXTURE_ROOT/auth.conf.off" "$FIXTURE_ROOT/auth.conf"
+   ```
+
+   Expected while the file is absent: `synthetic-auth: unavailable` and
+   `source_control_exit=77`. The final `mv` restores the current guest; the
+   disposable QEMU snapshot also discards the temporary rename.
+
+5. Repeat the recovered candidate after restoration:
+
+   ```sh
+   printf '%s\n' 'FIXTURE_PASSWORD_001' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+   echo "repeat_exit=$?"
+   ```
+
+   Expected: `synthetic-auth: accepted` and `repeat_exit=0`.
+
+**Concrete Base64 pattern — optional second manual image:**
+
+Build and boot a second, reversible representation:
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe798-password-leak-env-base64
+TEST_FIRMWARE="$TEST_DEVICE-$TEST_SCENARIO"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm \
+  -e IOTBENCH_BUILD_MODE=fixture \
+  -e IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=1 yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+After the normal guest login, run:
+
+```sh
+FIXTURE_ROOT=/usr/share/iotbench/password-leak/env-base64
+cat "$FIXTURE_ROOT/encoded.env"
+printf '%s\n' 'wrong-value' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+echo "baseline_exit=$?"
+printf '%s\n' 'FIXTURE_ENCODED_PASSWORD_001' | "$FIXTURE_ROOT/fixture-auth" --isolated-fixture
+echo "recovered_exit=$?"
+```
+
+Expected: `encoded.env` contains
+`PASSWORD_B64="RklYVFVSRV9FTkNPREVEX1BBU1NXT1JEXzAwMQ=="`; the wrong candidate
+is rejected with exit `1` and the decoded synthetic value is accepted with
+exit `0`. The native consumer performs Base64 decoding itself.
+
+### Scenario and scope
+
+**⚙️ Implementation.** The 15 variants cover `.conf`, `.cfg`, `.ini`, `.env`,
+`.json`, `.xml`, shell, C/header, properties, init, log and text patterns;
+`json-base64` and `env-base64` are the encoded forms. Each of the eleven device
+profiles has one image per variant (165 recipes). The selected image contains
+exactly one credential-bearing source file under
+`/usr/share/iotbench/password-leak/<variant>/`. Its `fixture-auth` ELF reads
+that file through installed metadata, handles key-value, INI, JSON, XML or
+C-literal syntax, and internally decodes Base64. Build and rootfs guards
+require fixture mode, one variant, ordinary root-owned permissions, the native
+helper, and no duplicate credential in that helper.
+
+**✅ Verification.** Evidence requires the installed source file, rejected
+wrong input, accepted recovered input, the temporary-source control returning
+`77`, and repeated acceptance after restoration. The separate `env-base64`
+image confirms an encoded representation reaches the same native path.
+
+> ⚠️ **Disclaimer:** Intentionally insecure lab fixture; not for deployment.
+> It demonstrates a recoverable synthetic credential in firmware files
+> (**CWE-798**), not a real OS account, external authentication, remote access,
+> command execution, or persistence.
+
+Source: [cwe798-password-leak](../meta-iotbench/recipes-vulns/cwe798-password-leak/).

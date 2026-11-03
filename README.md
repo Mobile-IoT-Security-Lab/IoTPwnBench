@@ -329,7 +329,6 @@ variants use reversible Base64 encoding. Nothing connects to an external
 authentication service or runs at boot.
 
 ```bash
-python3 scripts/test-password-leak-fixture.py --isolated-fixture
 FIRMWARE=router-cwe798-password-leak-conf-password docker compose run --rm \
   -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=1 yocto
 ```

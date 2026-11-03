@@ -67,6 +67,10 @@ case "$FIRMWARE" in
         NETDEV=""
         EXTRA_ENDPOINT="Native path fixture: run the isolated socket tests from the guest serial console"
         ;;
+    *-cwe798-password-leak-*)
+        NETDEV=""
+        EXTRA_ENDPOINT="Password Leak fixture: run the isolated local test from the guest serial console"
+        ;;
     *-cwe???-apache-web)
         NETDEV=""
         EXTRA_ENDPOINT="Apache fixture: run tests on guest loopback via the serial console"

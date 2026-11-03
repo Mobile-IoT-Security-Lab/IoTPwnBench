@@ -34,10 +34,13 @@ python iotbench_password_leak_metadata() {
     if sorted(p.name for p in base.iterdir()) != [variant]:
         bb.fatal('Exactly one Password Leak fixture may be installed')
     root = base / variant
+    native_auth = root / 'fixture-auth'
     for path in [root] + list(root.rglob('*')):
-        mode = 0o755 if path.is_dir() else 0o644
+        mode = 0o755 if path.is_dir() or path == native_auth else 0o644
         if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_gid != 0 or path.stat().st_mode & 0o7777 != mode:
             bb.fatal('Password Leak fixture must retain ordinary root-owned permissions')
+    if not native_auth.is_file() or native_auth.read_bytes()[:4] != b'\x7fELF':
+        bb.fatal('Password Leak fixture must contain its native local authenticator')
     lib = runpy.run_path(str(root / 'fixture-lib.py'))
     findings = lib['scan'](root)
     expected = json.loads((root / 'expected-findings.json').read_text())
@@ -47,4 +50,6 @@ python iotbench_password_leak_metadata() {
     wanted = [{k: e[k] for k in ('path', 'line', 'field', 'encoding', 'sha256')} for e in expected]
     if actual != wanted:
         bb.fatal('Password Leak rootfs differs from expected synthetic finding')
+    if any(f['value'].encode() in native_auth.read_bytes() for f in findings):
+        bb.fatal('Password Leak authenticator must read, not embed, the synthetic credential')
 }

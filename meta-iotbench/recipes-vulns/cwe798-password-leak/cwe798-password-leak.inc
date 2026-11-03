@@ -4,7 +4,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI = "file://LICENSE file://NOTICE file://fixture-build.py file://fixture-lib.py \
-           file://fixture-auth.py file://synthetic-inventory.json \
+           file://fixture-auth.py file://fixture-auth.c file://synthetic-inventory.json \
            file://expected-findings.json file://fixtures file://negative"
 S = "${UNPACKDIR}"
 
@@ -27,7 +27,11 @@ python __anonymous() {
         raise bb.parse.SkipRecipe(str(error))
 }
 
-do_compile[noexec] = "1"
+do_compile() {
+    ${CC} ${CPPFLAGS} ${CFLAGS} -std=c11 -Wall -Wextra -Werror \
+        -DIOTBENCH_FIXTURE_ROOT='"${FIXTURE_ROOT}"' \
+        ${S}/fixture-auth.c ${LDFLAGS} -o ${B}/fixture-auth
+}
 do_install[vardeps] += "IOTBENCH_BUILD_MODE IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE MACHINE IOTBENCH_PASSWORD_LEAK_VARIANT"
 do_install() {
     # Stage to a fresh tree, then copy only this scenario into the package.
@@ -38,7 +42,8 @@ do_install() {
         --machine '${MACHINE}'
     install -d ${D}${datadir}/iotbench/password-leak
     cp -R ${B}/password-leak-stage${FIXTURE_ROOT} ${D}${datadir}/iotbench/password-leak/
+    install -m 0755 ${B}/fixture-auth ${D}${FIXTURE_ROOT}/fixture-auth
 }
 
-# Source data only. No executable payloads, units, accounts or startup hooks.
+# One local native credential consumer only; no units, accounts or startup hooks.
 FILES:${PN} = "${FIXTURE_ROOT}"
