@@ -7,7 +7,12 @@ IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
 IMAGE_ROOTFS_EXTRA_SPACE = "524288"
 
 python iotbench_java_deserialization_guard() {
+    # A corrected twin installs the -fixed package, with IOTBENCH_CWE reset to
+    # 'none' and the original CWE kept in IOTBENCH_CORRECTS_CWE.
     package = 'cwe502-java-deserialization'
+    twin = (d.getVar('IOTBENCH_VULN_INSTALL') or '').endswith('-fixed')
+    if twin:
+        package = package + '-fixed'
     if (d.getVar('IOTBENCH_BUILD_MODE') != 'fixture' or
             d.getVar('IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE') != '1'):
         bb.fatal('Java deserialization requires explicit opt-in and fixture mode')

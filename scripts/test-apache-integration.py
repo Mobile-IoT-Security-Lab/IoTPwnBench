@@ -53,6 +53,8 @@ def function(path, name):
 class Integration(unittest.TestCase):
     def test_matrix_and_single_variant_sources(self):
         recipes = set((LAYER / 'recipes-images').glob('iotbench-*-apache-web.bb'))
+        twins = set((LAYER / 'recipes-images').glob('iotbench-*-apache-web-fixed.bb'))
+        self.assertEqual(len(twins), 110)
         self.assertEqual(len(recipes), 110)
         for device in POLICY['DEVICES']:
             for cwe in POLICY['CWES']:
@@ -68,7 +70,7 @@ class Integration(unittest.TestCase):
         return Data(IOTBENCH_BUILD_MODE=mode, IOTBENCH_ENABLE_APACHE_FIXTURE=enabled,
                     MACHINE='qemuarm64', THISDIR=str(FILES.parent),
                     IOTBENCH_APACHE_LAYER=str(LAYER), APACHE_FIXTURE_CWE='089',
-                    IOTBENCH_VULN_INSTALL='apache-web-fixture-cwe089',
+                    IOTBENCH_VULN_INSTALL='apache-web-fixture-cwe089', IOTBENCH_TWIN_SUFFIX='',
                     IMAGE_INSTALL='packagegroup-core-boot apache-web-fixture-cwe089')
 
     def test_production_and_mixed_image_rejected(self):

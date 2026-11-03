@@ -1,0 +1,30 @@
+{
+  "scenario": "rest-internal-files",
+  "cwes": [
+    "CWE-22",
+    "CWE-73"
+  ],
+  "intentional_vulnerabilities": 0,
+  "source": "fixture-rest.c: handle_http_request -> extract_file_parameter (GET /api/config?file=)",
+  "flow": "file -> read_internal_file -> confined_open(api/%s) with the traversal check enforced -> refused",
+  "sink_flags": "O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK",
+  "confinement": "RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV relative to fs fd",
+  "intended_api_directory": "fs/api",
+  "restricted_marker": "fs/restricted/marker.txt",
+  "ordinary": {
+    "input": "config.cfg",
+    "status": 200,
+    "file": "fs/api/config.cfg"
+  },
+  "boundary": {
+    "input": "../restricted/marker.txt",
+    "status": 403
+  },
+  "other_endpoints": [
+    "GET /api/status?file=status.cfg",
+    "POST /api/config/read (form file=config.cfg)"
+  ],
+  "network": "AF_UNIX only; no TCP/UDP listener",
+  "production": "disabled stub, exit 77",
+  "corrected": true
+}

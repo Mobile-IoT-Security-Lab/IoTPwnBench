@@ -18,4 +18,4 @@ venv/
 .DS_Store
 
 # Active validation scratch data and recovery state
-/0_Data/TMP/
+/0_Data/TMP/build-logs/

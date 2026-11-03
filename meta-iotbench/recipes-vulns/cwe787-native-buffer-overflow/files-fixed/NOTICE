@@ -1,0 +1,7 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - LOCAL SECURITY TESTING ONLY - NOT FOR DEPLOYMENT
+Primary: CWE-787 (Out-of-bounds Write).
+Contributing cause: CWE-20 (Improper Input Validation).
+Broader category: CWE-119 (Improper Restriction of Operations within the Bounds of a Memory Buffer).
+One intentional defect: a validated transport length is not checked against a 64-byte destination before indexed writes.
+Use only disposable synthetic firmware or local diagnostic processes. No service is started automatically.
+The corrected helper refuses a payload longer than its configuration.

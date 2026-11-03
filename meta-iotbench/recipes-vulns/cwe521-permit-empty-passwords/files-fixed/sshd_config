@@ -1,0 +1,16 @@
+# Synthetic IoTBench configuration-only fixture. No SSH daemon is installed.
+# The corrected variant keeps PermitEmptyPasswords no.
+PermitEmptyPasswords no
+PasswordAuthentication yes
+PermitRootLogin no
+KbdInteractiveAuthentication no
+UsePAM no
+HostbasedAuthentication no
+IgnoreRhosts yes
+StrictModes yes
+PermitUserEnvironment no
+AllowAgentForwarding no
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no
+ListenAddress 127.0.0.1

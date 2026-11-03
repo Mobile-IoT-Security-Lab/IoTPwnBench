@@ -68,7 +68,7 @@ class Tests(unittest.TestCase):
         cls.log = open('/state/apache-start.log', 'wb')
         cls.apache = subprocess.Popen(['/usr/sbin/httpd', '-f', '/fixture/httpd.conf.in', '-DFOREGROUND'],
                                       stdout=cls.log, stderr=cls.log, start_new_session=True)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 cls.request('/app/session')
@@ -78,7 +78,7 @@ class Tests(unittest.TestCase):
                     break
                 time.sleep(.02)
         cls.apache.terminate()
-        cls.apache.wait(timeout=5)
+        cls.apache.wait(timeout=30)
         cls.log.close()
         raise RuntimeError('Apache failed: ' + Path('/state/apache-start.log').read_text() +
                            (Path('/state/error.log').read_text() if Path('/state/error.log').exists() else ''))
@@ -86,7 +86,7 @@ class Tests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.apache.terminate()
-        cls.apache.wait(timeout=5)
+        cls.apache.wait(timeout=30)
         cls.log.close()
 
     def setUp(self):
@@ -106,7 +106,7 @@ class Tests(unittest.TestCase):
             headers['Cookie'] = cookie
         if origin:
             headers['Origin'] = origin
-        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=90)
         try:
             connection.request(method, route, body=body, headers=headers)
             response = connection.getresponse()

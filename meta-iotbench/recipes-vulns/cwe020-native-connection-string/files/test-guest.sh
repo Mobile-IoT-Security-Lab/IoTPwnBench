@@ -12,7 +12,11 @@ work=$(mktemp -d /tmp/iotbench-connection-guest.XXXXXX)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 cd "$work"
 run() {
-    timeout 15 setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 15 setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper"
+    else
+        setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper"
+    fi
 }
 check() {
     expected=$1
@@ -21,7 +25,7 @@ check() {
 }
 printf '\000\007private' | check 1
 printf '\000\006shared' | check 1
-printf '\000\017private&mode=rw#' | check 0
+printf '\000\020private&mode=rw#' | check 0
 printf '\000\007private' | check 1
 printf '%s\n' 'PASS real SQLite normal, injected and reset connection modes'
 reject() {

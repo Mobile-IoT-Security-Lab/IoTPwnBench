@@ -1,0 +1,30 @@
+{
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "ground_truth_label": "Vulnerable Bash files — Path Traversal",
+  "cwe": "CWE-22",
+  "weakness": "Path Traversal in a Bash firmware helper caused by concatenating user-controlled path input with an intended base directory without sufficient canonicalization or boundary validation.",
+  "script": "@BINDIR@/iotbench-bash-read",
+  "input": "script argument $1, assigned to INPUT",
+  "intended_base_directory": "@DATADIR@/iotbench/bash-path-traversal/data/",
+  "construction": "TARGET=\"${BASE_DIR}${INPUT}\"",
+  "missing_validation": "No normalization, canonicalization, traversal rejection or check that TARGET remains inside data/",
+  "sink": "Bash read -r loop with quoted input redirection: done < \"$TARGET\"",
+  "public_file": "@DATADIR@/iotbench/bash-path-traversal/data/public.txt",
+  "internal_file": "@DATADIR@/iotbench/bash-path-traversal/internal/private-fixture.txt",
+  "constructed_path": "@DATADIR@/iotbench/bash-path-traversal/data/../internal/private-fixture.txt",
+  "signal": "SYNTHETIC_INTERNAL_FIXTURE_DATA",
+  "containment": {
+    "jail": "@DATADIR@/iotbench/bash-path-traversal/rootfs",
+    "builtin": "@LIBDIR@/iotbench/bash-path-traversal/fixture-confine.so",
+    "scope": "Fixed outer lab boundary, independent of and larger than the intended data/ boundary",
+    "uid_gid_after_confinement": "990:990",
+    "only_synthetic_files_inside": true,
+    "no_privilege_gain": true
+  },
+  "read_only": true,
+  "network_required": false,
+  "label": "cwe022-bash-path-traversal (corrected variant)",
+  "corrects": "cwe022-bash-path-traversal",
+  "expected_signal": "none",
+  "corrected_behavior": "Only a plain file name is accepted, so ../internal/private-fixture.txt is refused and no internal data is returned."
+}

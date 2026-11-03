@@ -1,6 +1,9 @@
 # One intentional path-handling flaw; both CWE identifiers describe that flow.
 IOTBENCH_CWE = "CWE-22 CWE-73"
-IOTBENCH_VULN_INSTALL = "cwe022-rest-internal-files"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe022-rest-internal-files${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_REST_FIXTURE ?= "0"
 IOTBENCH_REST_LAYER := "${THISDIR}/.."
@@ -14,7 +17,7 @@ python iotbench_rest_fixture_guard() {
             d.getVar('IOTBENCH_ENABLE_REST_FIXTURE'), d.getVar('MACHINE'))
     except ValueError as error:
         bb.fatal(str(error))
-    expected = 'cwe022-rest-internal-files'
+    expected = 'cwe022-rest-internal-files' + d.getVar('IOTBENCH_TWIN_SUFFIX')
     if d.getVar('IOTBENCH_VULN_INSTALL') != expected:
         bb.fatal('REST fixtures must contain exactly one scenario package')
     extras = (d.getVar('IMAGE_INSTALL') or '').split()

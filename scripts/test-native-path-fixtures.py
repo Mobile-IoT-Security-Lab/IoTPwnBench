@@ -14,6 +14,9 @@ import tempfile
 import textwrap
 import unittest
 
+# These tests parse tool output as text, so run the tools in the neutral locale.
+os.environ["LC_ALL"] = "C"
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / 'meta-iotbench'
 FILES = LAYER / 'recipes-vulns/native-path-fixture/files'
@@ -47,7 +50,7 @@ class Data:
         self.values = {'IOTBENCH_BUILD_MODE': mode, 'IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE': enable,
                        'MACHINE': machine, 'THISDIR': str(FILES.parent), 'IOTBENCH_PATH_LAYER': str(LAYER),
                        'PATH_FIXTURE_CWE': cwe, 'PATH_FIXTURE_PACKAGE': VARIANTS[cwe],
-                       'IOTBENCH_VULN_INSTALL': VARIANTS[cwe],
+                       'IOTBENCH_VULN_INSTALL': VARIANTS[cwe], 'IOTBENCH_TWIN_SUFFIX': '', 'IOTBENCH_TWIN': '0',
                        'IMAGE_INSTALL': 'packagegroup-core-boot ' + VARIANTS[cwe]}
 
     def getVar(self, key):
@@ -193,6 +196,7 @@ class Tests(unittest.TestCase):
                           '    @staticmethod\n'
                           '    def fatal(message): raise ValueError(message)\n'
                           'values = json.loads(sys.argv[2])\n'
+                          'values.setdefault("IOTBENCH_TWIN", "0"); values.setdefault("IOTBENCH_TWIN_SUFFIX", "")\n'
                           'source = re.search(r"^python iotbench_native_path_metadata\\(\\) \\{\\n(.*?)^\\}", '
                           'Path(sys.argv[1]).read_text(), re.M | re.S).group(1)\n'
                           'exec(compile(textwrap.dedent(source), sys.argv[1], "exec"), {"d": Data(), "bb": BB})\n')

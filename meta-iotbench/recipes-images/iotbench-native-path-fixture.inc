@@ -4,7 +4,10 @@ IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE ?= "0"
 IOTBENCH_PATH_LAYER := "${THISDIR}/.."
 IOTBENCH_DEVICE_INSTALL = ""
 IOTBENCH_CWE = "CWE-${@int(d.getVar('PATH_FIXTURE_CWE'))}"
-IOTBENCH_VULN_INSTALL = "${PATH_FIXTURE_PACKAGE}"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "${PATH_FIXTURE_PACKAGE}${IOTBENCH_TWIN_SUFFIX}"
 IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
 
 python iotbench_native_path_guard() {
@@ -16,14 +19,24 @@ python iotbench_native_path_guard() {
     except ValueError as error:
         bb.fatal(str(error))
     variants = {'022': 'cwe022-native-path-traversal', '020': 'cwe020-native-filename-validation'}
-    expected = variants.get(d.getVar('PATH_FIXTURE_CWE'))
-    if (not expected or d.getVar('PATH_FIXTURE_PACKAGE') != expected or
+    package = variants.get(d.getVar('PATH_FIXTURE_CWE'))
+    expected = (package or '') + d.getVar('IOTBENCH_TWIN_SUFFIX')
+    if (not package or d.getVar('PATH_FIXTURE_PACKAGE') != package or
             d.getVar('IOTBENCH_VULN_INSTALL') != expected or
             set((d.getVar('IMAGE_INSTALL') or '').split()) != {'packagegroup-core-boot', expected}):
         bb.fatal('Native path fixture images require exactly their own variant and no device daemons')
 }
 do_rootfs[prefuncs] += "iotbench_native_path_guard"
 ROOTFS_POSTPROCESS_COMMAND += "iotbench_native_path_metadata; "
+
+ROOTFS_POSTPROCESS_COMMAND += "iotbench_isolated_netns_sysctl; "
+
+# The guest kernel gives every new network namespace the fallback tunnel device
+# sit0 unless this sysctl is 1, but the isolated runner needs a namespace with lo only.
+iotbench_isolated_netns_sysctl() {
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/sysctl.d
+    echo 'net.core.fb_tunnels_only_for_init_net = 1' > ${IMAGE_ROOTFS}${sysconfdir}/sysctl.d/90-iotbench-isolated-netns.conf
+}
 
 python iotbench_native_path_metadata() {
     import hashlib
@@ -39,7 +52,10 @@ python iotbench_native_path_metadata() {
         shutil.copyfile(source / name, target / name)
     base = root / d.getVar('datadir').lstrip('/') / 'iotbench/native-path'
     info = json.loads((base / 'variant.json').read_text())
+    twin = d.getVar('IOTBENCH_TWIN') == '1'
     if info['cwe'] != d.getVar('PATH_FIXTURE_CWE') or info['binary_origin'] != 'target':
+        bb.fatal('Wrong native path artifact variant/origin')
+    if info['intentional_vulnerabilities'] != (0 if twin else 1) or bool(info.get('corrected')) != twin:
         bb.fatal('Wrong native path artifact variant/origin')
     for path in [base] + list(base.rglob('*')):
         expected = 0o755 if path.is_dir() or path.parent == base / 'bin' else 0o644
@@ -52,6 +68,6 @@ python iotbench_native_path_metadata() {
     manifest = pathlib.Path(d.getVar('IMAGE_MANIFEST'))
     if manifest.exists():
         packages = [line.split()[0] for line in manifest.read_text().splitlines() if line.split()]
-        if [p for p in packages if p.startswith('cwe')] != [d.getVar('PATH_FIXTURE_PACKAGE')]:
+        if [p for p in packages if p.startswith('cwe')] != [d.getVar('PATH_FIXTURE_PACKAGE') + d.getVar('IOTBENCH_TWIN_SUFFIX')]:
             bb.fatal('Unexpected vulnerability packages in native path fixture image')
 }

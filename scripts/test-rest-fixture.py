@@ -17,6 +17,9 @@ import tempfile
 import textwrap
 import unittest
 
+# These tests parse tool output as text, so run the tools in the neutral locale.
+os.environ["LC_ALL"] = "C"
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / 'meta-iotbench'
 SLUG = 'cwe022-rest-internal-files'
@@ -318,7 +321,7 @@ class FixtureTests(unittest.TestCase):
             def __init__(self, mode='fixture', enabled='1', machine='qemuarm64'):
                 self.values = {'IOTBENCH_BUILD_MODE': mode, 'IOTBENCH_ENABLE_REST_FIXTURE': enabled,
                                'MACHINE': machine, 'THISDIR': str(SOURCE.parent),
-                               'IOTBENCH_REST_LAYER': str(LAYER), 'IOTBENCH_VULN_INSTALL': SLUG,
+                               'IOTBENCH_REST_LAYER': str(LAYER), 'IOTBENCH_VULN_INSTALL': SLUG, 'IOTBENCH_TWIN_SUFFIX': '',
                                'IMAGE_INSTALL': 'device-router ' + SLUG}
 
             def getVar(self, key):

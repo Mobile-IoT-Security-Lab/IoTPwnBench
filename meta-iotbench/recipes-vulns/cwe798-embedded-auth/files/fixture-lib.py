@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-VARIANTS = ('native', 'shell', 'ini', 'json', 'xml', 'yaml', 'connection-string', 'base64')
+VARIANTS = ('c-source', 'shell', 'ini', 'json', 'xml', 'yaml', 'connection-string', 'base64')
 MACHINES = ('qemuarm64', 'qemuarm', 'qemux86-64', 'qemux86', 'qemumips')
 FILES = dict(zip(VARIANTS, ('credential.c', 'credentials.sh', 'auth.ini', 'auth.json',
                            'auth.xml', 'auth.yaml', 'connection.conf', 'encoded.json')))
@@ -56,10 +56,10 @@ def pair(fields):
 
 def read_pair(path, variant):
     text = Path(path).read_text(encoding='ascii')
-    if variant == 'native':
+    if variant == 'c-source':
         matches = re.findall(r'static const char (username|password)\[\] = "([^"]+)";', text)
         if len(matches) != 2:
-            raise ValueError('Native source must define exactly one pair')
+            raise ValueError('C source must define exactly one pair')
         return pair(object_pairs(matches))
     if variant == 'ini':
         parser = configparser.ConfigParser(interpolation=None)
@@ -114,7 +114,7 @@ def read_pair(path, variant):
 
 def verifier(root, config):
     variant = config['variant']
-    if variant == 'native':
+    if variant == 'c-source':
         library = ctypes.CDLL(str(root / 'credential.so'))
         function = library.fixture_auth
         function.argtypes = (ctypes.c_char_p, ctypes.c_char_p)

@@ -1,7 +1,7 @@
 {
-  "native": {
-    "username": "fixture798_native",
-    "password": "SYNTH_ONLY_798_native_P9!",
+  "c-source": {
+    "username": "fixture798_c_source",
+    "password": "SYNTH_ONLY_798_c_source_P9!",
     "file": "credential.c",
     "representation": "C string constants in ELF .rodata"
   },

@@ -1,0 +1,25 @@
+{
+  "contract": "one ASCII label=<value> LF EOF request; value [A-Za-z0-9_-]{1,128}",
+  "intentional_defects_per_fixture": 0,
+  "defect": "none. FixtureRequest.read enforces the label alphabet [A-Za-z0-9_-]",
+  "source": "System.in",
+  "field": "label",
+  "fixtures": {
+    "os": {
+      "jar": "fixture-os-command.jar",
+      "primary_cwe": "CWE-78",
+      "broader_cwe": "CWE-77",
+      "contributing_cwe": "CWE-20",
+      "intended_signal": "/work/os-marker.txt"
+    },
+    "app": {
+      "jar": "fixture-app-command.jar",
+      "primary_cwe": "CWE-77",
+      "contributing_cwe": "CWE-20",
+      "intended_signal": "/work/app-marker.txt"
+    }
+  },
+  "corrects": "java-command-fixture",
+  "expected_signal": "none",
+  "corrected_behavior": "A label with command syntax is rejected with exit 2 and no marker file is written."
+}

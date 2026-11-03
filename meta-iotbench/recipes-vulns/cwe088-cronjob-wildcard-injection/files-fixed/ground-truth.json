@@ -1,0 +1,33 @@
+{
+  "scenario": "Vulnerable Cronjob Configurations - Cronjob Wildcard Injection",
+  "catalog_cwe": "CWE-88",
+  "related_cwes": [
+    "CWE-78",
+    "CWE-269"
+  ],
+  "single_scenario": true,
+  "package": "cwe088-cronjob-wildcard-injection",
+  "fixture_root": "/usr/share/iotbench/cronjob-wildcard-injection",
+  "user": "fixturefiles",
+  "uid": 988,
+  "inbox_mode": "0750",
+  "schedule": "* * * * *",
+  "secure_arguments": [
+    "--fixture-test",
+    "--",
+    "*"
+  ],
+  "boundary_filename": "--fixture-diagnostic",
+  "secure_result": "nominal",
+  "data_flow": "fixturefiles creates/renames inbox filename -> CrOniE invokes the root cron.d shell command -> the wildcard expands after -- in the inbox cwd -> every name stays an operand -> nominal stdout",
+  "limitations": "The helper only parses glob-expanded argument strings and itself writes no files. CWE-78 and CWE-269 describe the modeled command/privilege boundary; no command execution or privilege escalation is implemented. File contents are never read.",
+  "corrected": true,
+  "scheduled_arguments": [
+    "--fixture-test",
+    "--",
+    "*"
+  ],
+  "live_crontab": "/etc/cron.d/iotbench-cron-wildcard-injection",
+  "cron_runas": "root",
+  "helper_changes_uid": false
+}

@@ -5,13 +5,14 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 SRC_URI = "file://LICENSE file://iotbench-coap-internal-files.c file://iotbench-coap-internal-files.service file://device.conf file://maintenance.dat file://NOTICE file://ground-truth.json"
 S = "${UNPACKDIR}"
 DEPENDS += "libcoap"
+RDEPENDS:${PN} += "python3-core python3-modules"
 
 inherit systemd useradd pkgconfig
 
 SYSTEMD_SERVICE:${PN} = "iotbench-coap-internal-files.service"
 USERADD_PACKAGES = "${PN}"
-GROUPADD_PARAM:${PN} = "--system --gid 992 coapfixture"
-USERADD_PARAM:${PN} = "--system --uid 992 --gid coapfixture --home-dir /nonexistent --no-create-home --shell /bin/false --password '!' coapfixture"
+GROUPADD_PARAM:${PN} = "--system --gid 960 coapfixture"
+USERADD_PARAM:${PN} = "--system --uid 960 --gid coapfixture --home-dir /nonexistent --no-create-home --shell /bin/false --password '!' coapfixture"
 
 do_compile() {
     ${CC} ${CFLAGS} ${LDFLAGS} -Wall -Wextra -Werror \
@@ -28,7 +29,7 @@ do_install() {
     install -d -m 0750 ${D}${datadir}/iotbench/coap-internal-files/internal
     install -m 0640 ${S}/device.conf ${D}${datadir}/iotbench/coap-internal-files/internal/device.conf
     install -m 0640 ${S}/maintenance.dat ${D}${datadir}/iotbench/coap-internal-files/internal/maintenance.dat
-    chown -R 0:992 ${D}${datadir}/iotbench/coap-internal-files/internal
+    chown -R 0:960 ${D}${datadir}/iotbench/coap-internal-files/internal
     install -m 0644 ${S}/NOTICE ${D}${datadir}/iotbench/coap-internal-files/NOTICE
     # Install the short data-flow source alongside the ELF for static analysis.
     install -m 0644 ${S}/iotbench-coap-internal-files.c ${D}${datadir}/iotbench/coap-internal-files/handler.c

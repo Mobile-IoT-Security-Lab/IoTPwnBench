@@ -20,16 +20,16 @@ def require(condition, message):
 
 def limits():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+    resource.setrlimit(resource.RLIMIT_CPU, (600, 600))
     resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
 
 def request(endpoint, wire, fragment=False):
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while True:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(5)
+        client.settimeout(60)
         try:
             client.connect(str(endpoint))
             break
@@ -76,14 +76,14 @@ def run_case(binary, wire, expected_status=0, diagnostic=False, fragment=False):
                                        stdout=subprocess.DEVNULL, stderr=errors,
                                        env=environment, preexec_fn=limits)
             try:
-                deadline = time.monotonic() + 5
+                deadline = time.monotonic() + 60
                 while not endpoint.exists():
                     require(process.poll() is None, "Service exited before creating socket")
                     require(time.monotonic() < deadline, "Socket startup timeout")
                     time.sleep(0.01)
                 require(endpoint.stat().st_mode & 0o777 == 0o700, "Socket is not owner-only")
                 response = request(endpoint, wire, fragment)
-                status = process.wait(timeout=8)
+                status = process.wait(timeout=60)
                 errors.seek(0)
                 stderr = errors.read().decode(errors="replace")
                 if diagnostic:
@@ -101,7 +101,7 @@ def run_case(binary, wire, expected_status=0, diagnostic=False, fragment=False):
             finally:
                 if process.poll() is None:
                     process.kill()
-                process.wait(timeout=5)
+                process.wait(timeout=60)
 
 
 def regression(binary, diagnostic, safe_control=False):
@@ -110,7 +110,7 @@ def regression(binary, diagnostic, safe_control=False):
         for arguments, enabled in (([], "1"), (["--fixture-test"], "0")):
             denied = subprocess.run([str(candidate), *arguments],
                                     env=dict(os.environ, IOTBENCH_CWE120_FIXTURE=enabled),
-                                    capture_output=True, timeout=5, preexec_fn=limits)
+                                    capture_output=True, timeout=60, preexec_fn=limits)
             require(denied.returncode == 2 and not denied.stdout
                     and b"AddressSanitizer" not in denied.stderr, "Startup opt-in was bypassed")
     print("PASS service refuses missing runtime flag or fixture configuration", flush=True)

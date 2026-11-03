@@ -6,7 +6,12 @@ iotbench_hardcoded_user_passwords_metadata() {
     if [ "$(stat -c '%u:%g:%a' "$fixture_accounts")" != "0:0:600" ]; then
         bbfatal "Synthetic account database must be root:root with mode 0600"
     fi
-    if ! cmp -s "$fixture_accounts" "${THISDIR}/../recipes-vulns/cwe798-hardcoded-user-passwords/files/accounts.conf"; then
+    # A corrected twin installs an empty account database, see IOTBENCH_VULN_INSTALL.
+    case "${IOTBENCH_VULN_INSTALL}" in
+        *-fixed) reference="${THISDIR}/../recipes-vulns/cwe798-hardcoded-user-passwords/files-fixed/accounts.conf" ;;
+        *) reference="${THISDIR}/../recipes-vulns/cwe798-hardcoded-user-passwords/files/accounts.conf" ;;
+    esac
+    if ! cmp -s "$fixture_accounts" "$reference"; then
         bbfatal "Synthetic user password must be installed verbatim in every firmware"
     fi
     fixture_helper="${IMAGE_ROOTFS}${bindir}/iotbench-fixture-auth"

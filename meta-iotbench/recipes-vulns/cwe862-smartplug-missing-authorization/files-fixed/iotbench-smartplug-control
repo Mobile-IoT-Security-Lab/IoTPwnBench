@@ -1,0 +1,42 @@
+#!/bin/sh
+# Corrected variant of CWE-862: the actor is authorized before the relay is changed.
+set -u
+
+REQUEST_TOPIC=iotbench/smartplug/control/set-relay
+RESULT_TOPIC=iotbench/smartplug/control-result
+mkdir -p /run/iotbench
+
+while :; do
+    mosquitto_sub -h 127.0.0.1 -p 1883 -v -t "$REQUEST_TOPIC" 2>/dev/null |
+    while IFS= read -r line; do
+        payload=${line#* }
+        device=""
+        actor=""
+        state=""
+        old_ifs=$IFS
+        IFS=';'
+        for field in $payload; do
+            case "$field" in
+                device=*) device=${field#device=} ;;
+                actor=*) actor=${field#actor=} ;;
+                state=*) state=${field#state=} ;;
+            esac
+        done
+        IFS=$old_ifs
+
+        if [ "$device" != "plug-lab-01" ] || { [ "$state" != "on" ] && [ "$state" != "off" ]; }; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected malformed request" || true
+            continue
+        fi
+
+        # Only the owner role may control the relay.
+        if [ "$actor" != "owner" ]; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected unauthorized actor" || true
+            continue
+        fi
+        printf '%s\n' "$state" > /run/iotbench/smartplug-relay-state
+        mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" \
+            -m "relay=${state} actor=${actor} authorization=owner" || true
+    done
+    sleep 1
+done

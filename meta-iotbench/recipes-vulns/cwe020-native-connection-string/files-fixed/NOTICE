@@ -1,0 +1,2 @@
+INTENTIONALLY INSECURE SYNTHETIC TEST FIXTURE - LOCAL SECURITY TESTING ONLY - NOT FOR DEPLOYMENT
+The corrected helper accepts only private or shared as the cache field.

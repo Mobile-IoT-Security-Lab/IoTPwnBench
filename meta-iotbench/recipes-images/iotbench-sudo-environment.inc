@@ -1,7 +1,10 @@
 # Native, environment-sensitive maintenance report; keep the catalog's old tag
 # for traceability, not as a claim that du demonstrates hardcoded credentials.
 IOTBENCH_CWE = "CWE-798"
-IOTBENCH_VULN_INSTALL = "cwe798-sudo-environment"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe798-sudo-environment${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_SUDO_ENV_FIXTURE ?= "0"
 

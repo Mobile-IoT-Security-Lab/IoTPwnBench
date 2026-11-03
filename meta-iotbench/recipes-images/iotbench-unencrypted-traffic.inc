@@ -1,6 +1,9 @@
 # Retain the catalog scenario ID; native login uses normal account authentication.
 IOTBENCH_CWE = "CWE-319 CWE-798"
-IOTBENCH_VULN_INSTALL = "cwe798-unencrypted-traffic"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe798-unencrypted-traffic${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_TELNET_FIXTURE ?= "0"
 

@@ -3,7 +3,10 @@
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_APACHE_FIXTURE ?= "0"
 IOTBENCH_APACHE_LAYER := "${THISDIR}/.."
-IOTBENCH_VULN_INSTALL = "apache-web-fixture-cwe${APACHE_FIXTURE_CWE}"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "apache-web-fixture-cwe${APACHE_FIXTURE_CWE}${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_CWE = "CWE-${APACHE_FIXTURE_CWE}"
 IOTBENCH_DEVICE_INSTALL = ""
 IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
@@ -13,12 +16,20 @@ python iotbench_apache_guard() {
     policy = d.getVar('IOTBENCH_APACHE_LAYER') + '/recipes-vulns/apache-web-fixture/files/fixture-build.py'
     runpy.run_path(policy)['validate_build'](d.getVar('IOTBENCH_BUILD_MODE'),
         d.getVar('IOTBENCH_ENABLE_APACHE_FIXTURE'), d.getVar('MACHINE'))
-    expected = 'apache-web-fixture-cwe' + d.getVar('APACHE_FIXTURE_CWE')
+    expected = 'apache-web-fixture-cwe' + d.getVar('APACHE_FIXTURE_CWE') + d.getVar('IOTBENCH_TWIN_SUFFIX')
     if d.getVar('IOTBENCH_VULN_INSTALL') != expected or set(d.getVar('IMAGE_INSTALL').split()) != {'packagegroup-core-boot', expected}:
         bb.fatal('Apache fixture images require exactly one variant and no other applications')
 }
 do_rootfs[prefuncs] += "iotbench_apache_guard"
 ROOTFS_POSTPROCESS_COMMAND += "iotbench_apache_metadata; "
+ROOTFS_POSTPROCESS_COMMAND += "iotbench_apache_isolated_netns_sysctl; "
+
+# The guest kernel gives every new network namespace the fallback tunnel device
+# sit0 unless this sysctl is 1, but the isolated runner needs a namespace with lo only.
+iotbench_apache_isolated_netns_sysctl() {
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/sysctl.d
+    echo 'net.core.fb_tunnels_only_for_init_net = 1' > ${IMAGE_ROOTFS}${sysconfdir}/sysctl.d/90-iotbench-isolated-netns.conf
+}
 
 python iotbench_apache_metadata() {
     import pathlib
@@ -49,6 +60,6 @@ python iotbench_apache_metadata() {
     if manifest.exists():
         packages = [line.split()[0] for line in manifest.read_text().splitlines() if line.split()]
         variants = [p for p in packages if p.startswith(('cwe', 'apache-web-fixture-cwe'))]
-        if variants != ['apache-web-fixture-cwe' + d.getVar('APACHE_FIXTURE_CWE')]:
+        if variants != ['apache-web-fixture-cwe' + d.getVar('APACHE_FIXTURE_CWE') + d.getVar('IOTBENCH_TWIN_SUFFIX')]:
             bb.fatal('Unexpected vulnerability packages in Apache fixture image')
 }

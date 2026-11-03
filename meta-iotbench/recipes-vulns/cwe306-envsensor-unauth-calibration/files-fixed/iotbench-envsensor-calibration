@@ -1,0 +1,46 @@
+#!/bin/sh
+# Corrected variant of CWE-306: calibration needs the device token.
+set -u
+
+REQUEST_TOPIC=iotbench/envsensor/calibration/set
+RESULT_TOPIC=iotbench/envsensor/calibration/result
+
+while :; do
+    mosquitto_sub -h 127.0.0.1 -p 1883 -v -t "$REQUEST_TOPIC" 2>/dev/null |
+    while IFS= read -r line; do
+        payload=${line#* }
+        sensor=""
+        offset=""
+        token=""
+        old_ifs=$IFS
+        IFS=';'
+        for field in $payload; do
+            case "$field" in
+                sensor=*) sensor=${field#sensor=} ;;
+                offset=*) offset=${field#offset=} ;;
+                token=*) token=${field#token=} ;;
+            esac
+        done
+        IFS=$old_ifs
+
+        case "$sensor" in co2|temperature|humidity) ;; *) sensor="" ;; esac
+        case "$offset" in ''|*[!0-9+.-]*) offset="" ;; esac
+        if [ -z "$sensor" ] || [ -z "$offset" ]; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected malformed calibration" || true
+            continue
+        fi
+
+        # The token is read from a root-only file and compared before any change.
+        expected=""
+        [ -f /etc/iotbench/calibration.token ] && expected="$(cat /etc/iotbench/calibration.token)"
+        if [ -z "$expected" ] || [ "$token" != "$expected" ]; then
+            mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" -m "rejected unauthenticated calibration" || true
+            continue
+        fi
+        mkdir -p /run/iotbench/calibration
+        printf '%s\n' "$offset" > "/run/iotbench/calibration/${sensor}"
+        mosquitto_pub -h 127.0.0.1 -t "$RESULT_TOPIC" \
+            -m "calibration-updated sensor=${sensor} offset=${offset} authenticated=yes" || true
+    done
+    sleep 1
+done

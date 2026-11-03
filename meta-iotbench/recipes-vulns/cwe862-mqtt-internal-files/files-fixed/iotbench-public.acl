@@ -1,0 +1,4 @@
+# Ordinary synthetic peripheral telemetry is intentionally public.
+topic read iotbench/#
+# The internal-maintenance topics device/config and maintenance/info are not readable
+# by anonymous subscribers. All other reads and ALL writes are denied by default.

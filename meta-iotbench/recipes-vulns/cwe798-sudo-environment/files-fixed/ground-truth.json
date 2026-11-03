@@ -1,0 +1,26 @@
+{
+  "scenario": "Bad SUDO Rights - Allow Changes to Environment Variables",
+  "catalog_number": 12,
+  "catalog_cwe": "CWE-798",
+  "single_scenario": true,
+  "package": "cwe798-sudo-environment",
+  "user": "fixtureenv",
+  "uid": 989,
+  "runas": "root",
+  "sudoers": "/etc/sudoers.d/iotbench-sudo-environment",
+  "environment_allowlist": [],
+  "commands": [
+    "/usr/bin/du -s /etc/iotbench",
+    "/usr/bin/du -sk /etc/iotbench",
+    "/usr/bin/id -u"
+  ],
+  "data": "Installed device configuration directory /etc/iotbench; measured filesystem allocation",
+  "normal_unit_bytes": 1024,
+  "environment_selected_unit_bytes": 1024,
+  "control_unit_bytes": 1024,
+  "expected_relation": "With env_reset and no env_keep, POSIXLY_CORRECT=1 has no effect: du -s and du -sk print the same count",
+  "mutates_device_files": false,
+  "python_runtime_runner": false,
+  "synthetic_responses": false,
+  "corrected": true
+}

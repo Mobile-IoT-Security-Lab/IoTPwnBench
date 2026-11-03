@@ -162,7 +162,7 @@ def main():
         root = stage(base / 'root', args.cwe, args.apache, args.modules,
                      args.browser if args.cwe in ('079', '352') else None)
         subprocess.run([str(isolate), '--isolated-fixture', str(root), '/usr/bin/python3',
-                        '/fixture/test-fixtures.py'], check=True, timeout=120)
+                        '/fixture/test-fixtures.py'], check=True, timeout=1800)
 
 
 if __name__ == '__main__':

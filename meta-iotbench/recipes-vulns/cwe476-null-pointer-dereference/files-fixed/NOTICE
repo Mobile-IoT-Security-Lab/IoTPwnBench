@@ -1,0 +1,9 @@
+CORRECTED VARIANT OF THE CWE-476 FIXTURE, NO KNOWN WEAKNESS INJECTED
+
+Ground truth: Vulnerable C Binaries — Null Pointer Dereference
+CWE-476: NULL Pointer Dereference
+
+fixture-device-info performs only a lookup in two compiled synthetic records.
+public succeeds; missing-record returns NULL, which is checked, and the helper exits with status 1.
+Run only in a disposable local guest. Disable core dumps before crash testing.
+test-null-dereference is a separate unprivileged Linux diagnostic supervisor.

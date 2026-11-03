@@ -1,0 +1,16 @@
+{
+  "scenario": "Weakly Configured Telnet - Unencrypted Traffic",
+  "catalog_number": 9,
+  "catalog_cwes": [
+    "CWE-798",
+    "CWE-287",
+    "CWE-276"
+  ],
+  "demonstrated_cwes": [],
+  "username": "maintenance",
+  "account_privileged": false,
+  "authentication_bypass": false,
+  "world_writable_auth_policy": false,
+  "corrected": true,
+  "maintenance_access": "No cleartext maintenance service. The maintenance account is locked and cannot log in remotely."
+}

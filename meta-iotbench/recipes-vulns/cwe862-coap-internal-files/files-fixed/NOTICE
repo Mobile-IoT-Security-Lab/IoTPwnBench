@@ -1,0 +1,7 @@
+CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+
+The CoAP GET resources /device/config and /maintenance/info expose fixed,
+synthetic internal maintenance files without authorization (CWE-862).
+Only the two predefined fixture files can be read. No credential, client
+filename, command, write operation, OS login or privilege grant is involved.
+The corrected daemon serves the internal files only to a client on the device itself.

@@ -30,12 +30,73 @@ meta-iotbench/            OpenEmbedded layer
 └── recipes-images/       iotbench-image.inc + one iotbench-<device>-<cwe>.bb per target
 scripts/
 ├── container-build-and-export.sh   builds the selected firmware (run by Compose)
-├── build-all.sh                    builds every firmware in turn
+├── build-all.sh                    builds the firmware catalog, with --all every opt-in fixture on every machine, with --fixed the corrected twins
+├── gen-fixed-twins.py              generates the corrected twin image recipes from the -fixed modules
 └── run-qemu.sh                     boots an exported firmware on the host
 ```
 
 The build also uses `meta-openembedded/meta-oe`, pinned to a revision compatible
 with the `wrynose` series, for the PHP recipe.
+
+## Requirements
+
+**Building and booting firmware.** Docker with the Compose plugin is enough,
+because the Yocto toolchain runs in the builder container. To boot an image,
+either install QEMU and `zstd` (see [Run QEMU on the host](#run-qemu-on-the-host))
+or use `scripts/run-qemu-docker.sh`, which needs nothing else on a Linux host.
+
+**Offline test scripts.** The `scripts/test-*.py` runners that do not boot a
+guest (`--static`, `--local`, `--isolated-fixture` and the build dispatch
+checks) run on the host. They need Python 3.7+ and a few tools. On Debian and
+Ubuntu:
+
+```bash
+sudo apt install -y python3 gcc make binutils libsqlite3-dev libssl-dev e2fsprogs \
+    zstd openssl openssh-client util-linux sudo
+```
+
+`libsqlite3-dev` is for `test-native-connection-string.py --local`, and `libssl-dev` for
+`test-weak-cipher.py`, which takes a helper you compile against the host OpenSSL:
+
+```bash
+gcc meta-iotbench/recipes-vulns/weak-cipher/files/iotbench-weak-cipher.c -lcrypto -o /tmp/iotbench-weak-cipher
+python3 scripts/test-weak-cipher.py /tmp/iotbench-weak-cipher
+```
+
+Some test modes need more, and the runner says so or skips that part:
+
+| Package | Needed by |
+| --- | --- |
+| `clang` | `test-integer-overflow.py --local --sanitize`, which checks Clang's unsigned-overflow diagnostic |
+| `apache2-bin` | `test-apache-fixtures.py`, which stages `/usr/sbin/apache2` and its modules. Unlike `apache2` it installs no service. The XSS and CSRF cases (CWE-79, CWE-352) also need a browser passed with `--browser PATH`, otherwise `--http-only` runs them with one check skipped each. Pass the native executable, for Google Chrome `/opt/google/chrome/chrome` and not the `google-chrome` launcher script |
+| `openssh-server` | the `sshd -t` and `sshd -T` checks of `test-ssh-empty-passwords.py`, skipped when `sshd` is absent. The tests need only the binary, but on Ubuntu the package also enables `ssh.socket`, which listens on port 22 on every interface. Run `sudo systemctl disable --now ssh.socket ssh.service` unless you want an SSH server |
+| `default-jdk-headless` | the full modes of the Java fixture tests, which take the JDK home with `--jdk`. `--static` needs no JDK. `test-java-sql-injection.py --local` also needs the sqlite-jdbc jar passed with `--jdbc-jar`, see below |
+| `shellcheck` | static analysis of the shell scripts, run by `test-build-all.py` when present |
+
+Examples that need the optional packages:
+
+```bash
+python3 scripts/test-integer-overflow.py --local --sanitize
+python3 scripts/test-apache-fixtures.py --cwe all --mode fixture --enable 1 \
+    --machine qemuarm64 --http-only
+JDK=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
+python3 scripts/test-java-command-fixture.py --jdk "$JDK"
+python3 scripts/test-java-deserialization-fixture.py --jdk "$JDK"
+```
+
+`test-java-sql-injection.py --local` pins the SQLite JDBC 3.53.4.0 jar by
+SHA-256 and refuses any other file. Download it from Maven Central and pass it
+with `--jdbc-jar`:
+
+```bash
+curl -fsSLO https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar
+python3 scripts/test-java-sql-injection.py --local --jdbc-jar sqlite-jdbc-3.53.4.0.jar
+```
+
+The native fixture tests also need Linux 5.6+ for `openat2`. The runners set
+`LC_ALL=C` and `umask 022` themselves, so they give the same result under any
+locale and shell setup. Run `python3 scripts/test-build-all.py` first to check
+the build script without building anything.
 
 ## Export permissions
 
@@ -229,7 +290,9 @@ scripts. Quit QEMU with **Ctrl-A**, then **X**.
 
 Ordinary builds skip the CWE-120 package. A full catalog build that includes
 these fixtures must explicitly opt in with
-`IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`.
+`IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`, or use
+`./scripts/build-all.sh --all`, which enables this and every other opt-in
+family for the firmware that needs it.
 See [docs/luca-payloads.md](docs/luca-payloads.md#buffer-overflow-esposto-tramite-service-interface)
 for all device mappings, input flow, safeguards and expected sanitizer results.
 
@@ -1902,12 +1965,32 @@ command again after changing the layer. Build for another architecture with
 YOCTO_MACHINE=qemux86-64 FIRMWARE=router-cwe078-os-command-injection docker compose up yocto
 ```
 
-Build every firmware in the catalog, optionally across architectures:
+Build the default firmware set, optionally across architectures. An opt-in
+fixture family is built only when its `IOTBENCH_ENABLE_*_FIXTURE` flag is
+exported as `1`:
 
 ```bash
 ./scripts/build-all.sh
 MACHINES="qemuarm64 qemuarm qemux86-64 qemux86 qemumips" ./scripts/build-all.sh
 ```
+
+Build every firmware, including all opt-in fixtures, on every architecture with
+`--all`. Each firmware gets only the one opt-in flag it needs, because the
+container build refuses to mix fixture families. The full run is thousands of
+builds, so filter it or make it resumable:
+
+```bash
+./scripts/build-all.sh --all
+./scripts/build-all.sh --all --machines qemuarm64 --keep-going --skip-existing
+./scripts/build-all.sh --dry-run --devices router --scenarios 'cwe798-*'
+./scripts/build-all.sh --list
+```
+
+`--dry-run` prints the exact `docker compose` commands without running them,
+`--list` prints each firmware with the opt-in flag it needs, `--build-builder`
+refreshes the builder image first, and failed builds are written to
+`deploy-images/build-all-failures.txt`. Run `python3 scripts/test-build-all.py`
+to check the script without building.
 
 ### Windows with WSL 2
 
@@ -1958,6 +2041,8 @@ To build all supported architectures instead of the default `qemuarm64`:
 ```bash
 MACHINES="qemuarm64 qemuarm qemux86-64 qemux86 qemumips" ./scripts/build-all.sh
 ```
+
+To also build every opt-in fixture, add `--all`.
 
 Artifacts are written to `deploy-images/<firmware>/<machine>/`. If WSL reports
 `Cannot connect to the Docker daemon at unix:///var/run/docker.sock`, confirm
@@ -2165,16 +2250,16 @@ socket permission, Python 3, a C compiler and `readelf`. They run offline.
 ## CWE-798 embedded credential pairs
 
 The opt-in `<device>-cwe798-embedded-auth-<variant>` family provides eight
-independent variants for each of the eleven device categories: `native`,
+independent variants for each of the eleven device categories: `c-source`,
 `shell`, `ini`, `json`, `xml`, `yaml`, `connection-string` and `base64`.
 One active synthetic username/password pair authenticates JSON requests over
-a private Unix socket. The native variant uses a compiled C library. These
+a private Unix socket. The c-source variant uses a compiled C library. These
 minimal images retain device metadata, omit device network daemons, and lock
 the inherited demo console password. No fixture starts automatically.
 
 ```bash
 python3 scripts/test-embedded-auth-fixture.py --isolated-fixture --filesystem-roundtrip
-FIRMWARE=router-cwe798-embedded-auth-native docker compose run --rm \
+FIRMWARE=router-cwe798-embedded-auth-c-source docker compose run --rm \
   -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE=1 yocto
 ```
 
@@ -2225,3 +2310,25 @@ Builds require `IOTBENCH_BUILD_MODE=fixture` and
 `IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE=1`; the default catalog skips this family.
 Run `/usr/bin/python3 scripts/test-native-symlink-fixture.py --isolated-fixture`.
 See [fixture policy, resources, build instructions, and validation](docs/marco-payloads.md#native-c-symbolic-link-following-cwe-61-and-cwe-59).
+
+## Corrected twins
+
+Each weakness module can have a corrected variant, and every image that installs
+it has a twin named `<firmware>-fixed`, the same device with the weakness removed.
+Twins are the negative ground truth for an analysis tool, which must report
+nothing on them. They are built only with `./scripts/build-all.sh --fixed` (or
+`--only-fixed`). `python3 scripts/gen-fixed-twins.py --report` lists the modules
+that have no corrected variant yet. The rules and the mechanism are in
+[docs/adding-a-firmware.md](docs/adding-a-firmware.md#corrected-twins-the-version-without-the-weakness).
+
+## License
+
+The original code, recipes, and documentation in this repository are released
+under the MIT License, see [LICENSE](LICENSE). Each recipe declares its license
+in its `LICENSE` field. Two recipes bundle third-party software and keep its
+own license, `recipes-vulns/cwe022-bash-path-traversal` (MIT and
+GPL-3.0-or-later) and `recipes-platform/iotbench-sqlite-jdbc` (Apache-2.0 and
+BSD-2-Clause).
+
+The images are intentionally vulnerable. Run them only in an isolated,
+disposable lab.

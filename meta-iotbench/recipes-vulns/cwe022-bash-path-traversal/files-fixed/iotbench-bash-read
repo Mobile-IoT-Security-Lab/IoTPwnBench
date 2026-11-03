@@ -1,0 +1,34 @@
+#!/bin/bash
+# CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+# The outer jail contains synthetic files only. The helper itself enforces data/.
+# All path construction and file reading below is performed by Bash builtins.
+printf '%s\n' 'CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED'
+if [[ $# -ne 1 ]]; then
+    printf '%s\n' 'Usage (guest root console): iotbench-bash-read <relative-path>' >&2
+    exit 2
+fi
+
+# No input is passed to this fixed lab-containment builtin. It changes only
+# this process, drops privileges, and fails closed; it never resolves TARGET.
+builtin enable -f '@LIBDIR@/iotbench/bash-path-traversal/fixture-confine.so' fixture_confine || exit 2
+builtin fixture_confine || exit 2
+
+BASE_DIR='@DATADIR@/iotbench/bash-path-traversal/data/'
+INPUT="$1"
+# Only a plain file name is accepted, so the path cannot leave data/.
+case "$INPUT" in
+    ''|.|..|*/*)
+        printf '%s\n' 'FIXTURE_FILE_UNAVAILABLE' >&2
+        exit 1
+        ;;
+esac
+TARGET="${BASE_DIR}${INPUT}"
+if [[ ! -f "$TARGET" ]]; then
+    printf '%s\n' 'FIXTURE_FILE_UNAVAILABLE' >&2
+    exit 1
+fi
+# The quoted redirection is the sink. Shell metacharacters remain filename data.
+# read and printf are builtins: no subprocess, command substitution or writes.
+while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s\n' "$line"
+done < "$TARGET"

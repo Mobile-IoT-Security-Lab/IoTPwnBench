@@ -185,10 +185,10 @@ def verify_image(path, debugfs):
         require(match and match[1] in DEVICES, "Unsupported device identity")
         device = match[1]
         require(metadata(HELPER) == (0o755, 0, 0), "Daemon must be ordinary root-owned 0755")
-        require(metadata(DATA + "/internal") == (0o750, 0, 992), "Wrong internal directory permissions")
+        require(metadata(DATA + "/internal") == (0o750, 0, 960), "Wrong internal directory permissions")
         for filename in RESOURCES.values():
             name = DATA + "/internal/" + filename
-            require(metadata(name) == (0o640, 0, 992), "Wrong internal file permissions")
+            require(metadata(name) == (0o640, 0, 960), "Wrong internal file permissions")
             require(inspect("cat", name) == expected_file(filename, device), "Wrong synthetic file content")
         require(inspect("cat", DATA + "/handler.c") == (SOURCE / "iotbench-coap-internal-files.c").read_bytes(),
                 "Installed handler source differs from source used for analysis")
@@ -198,7 +198,7 @@ def verify_image(path, debugfs):
                 and inspect("cat", DATA + "/NOTICE") == (SOURCE / "NOTICE").read_bytes(), "Warning missing")
         users = [line.split(":") for line in inspect("cat", "/etc/passwd").decode().splitlines()
                  if line.startswith("coapfixture:")]
-        require(len(users) == 1 and users[0][2:4] == ["992", "992"] and users[0][-1] == "/bin/false",
+        require(len(users) == 1 and users[0][2:4] == ["960", "960"] and users[0][-1] == "/bin/false",
                 "Wrong unprivileged daemon account")
         require(any(line.startswith("coapfixture:!:") for line in inspect("cat", "/etc/shadow").decode().splitlines()),
                 "Daemon account must have a locked password")
@@ -261,7 +261,7 @@ def verify_guest(device, timeout, port):
         require(WARNING.encode() in transcript, "Required login warning missing")
         guest(f"systemctl is-active --quiet {SERVICE} && "
               f"grep -Fx 'DEVICE_CLASS=\"{device}\"' /etc/iotbench/device.conf && "
-              f"test \"$(stat -c '%u:%g:%a' {DATA}/internal/device.conf)\" = 0:992:640",
+              f"test \"$(stat -c '%u:%g:%a' {DATA}/internal/device.conf)\" = 0:960:640",
               "COAP_STARTUP")
         verify_protocol(device, port)
 
@@ -278,7 +278,7 @@ def verify_guest(device, timeout, port):
         require(exchange(packet("/device/config"), port)[0] == 160, "Missing file must fail with 5.00")
         guest(f"ln -s ../NOTICE {target}", "COAP_SYMLINK")
         require(exchange(packet("/device/config"), port)[0] == 160, "Symlink must fail with 5.00")
-        guest(f"rm {target} && printf '%513s' 'fixture-only' > {target} && chown 0:992 {target} && chmod 0640 {target}",
+        guest(f"rm {target} && printf '%513s' 'fixture-only' > {target} && chown 0:960 {target} && chmod 0640 {target}",
               "COAP_OVERSIZED")
         require(exchange(packet("/device/config"), port)[0] == 160, "Oversized file must fail with 5.00")
         guest(f"cp -p {backup} {target} && rm {backup}", "COAP_RESTORE")

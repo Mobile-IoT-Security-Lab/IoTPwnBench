@@ -1,0 +1,31 @@
+{
+  "label": "MQTT Server Communicating with Vulnerable Internal Files (corrected variant)",
+  "cwe": "CWE-862",
+  "fixture_only": true,
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "publisher": "@BINDIR@/iotbench-mqtt-internal-files",
+  "source": "@DATADIR@/iotbench/mqtt-internal-files/publisher.c",
+  "broker_config": "/etc/mosquitto/iotbench.conf",
+  "public_acl": "/etc/mosquitto/iotbench-public.acl",
+  "publisher_acl": "/etc/mosquitto/iotbench-publish.acl",
+  "public_listener": "guest TCP 1883 (host loopback forward only)",
+  "publisher_listener": "127.0.0.1:1884 inside firmware only; not forwarded",
+  "mappings": [
+    {
+      "topic": "device/config",
+      "file": "@DATADIR@/iotbench/mqtt-internal-files/internal/device.conf",
+      "access": "anonymous read denied; all public writes denied"
+    },
+    {
+      "topic": "maintenance/info",
+      "file": "@DATADIR@/iotbench/mqtt-internal-files/internal/maintenance.dat",
+      "access": "anonymous read denied; all public writes denied"
+    }
+  ],
+  "client_controlled_path": false,
+  "credentials": null,
+  "remediation": "Remove public read grants for internal topics; authenticate maintenance clients and authorize each sensitive topic.",
+  "corrects": "cwe862-mqtt-internal-files",
+  "expected_signal": "none",
+  "corrected_behavior": "The public ACL no longer grants read access to device/config and maintenance/info, so an anonymous subscriber receives nothing on them."
+}

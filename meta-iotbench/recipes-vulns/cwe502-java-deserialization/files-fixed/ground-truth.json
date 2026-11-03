@@ -1,0 +1,25 @@
+{
+  "primary_cwe": "CWE-502",
+  "contributing_cwe": "CWE-20",
+  "intentional_defects_per_fixture": 1,
+  "jar": "fixture-deserialization.jar",
+  "source": "System.in -> bounded byte[] -> ByteArrayInputStream",
+  "sink": "FixtureDeserialize.process: ObjectInputStream.readObject",
+  "intended_type": "org.iotbench.fixture.deserialization.FixtureData",
+  "unexpected_type": "org.iotbench.fixture.deserialization.FixtureMarker",
+  "callback": "FixtureMarker.readObject -> static events++",
+  "late_check": "FixtureDeserialize.process: instanceof FixtureData",
+  "observation": "FixtureHarness reads FixtureMarker.eventCount independently of the CLI response",
+  "comparison": "test harness merges explicit FixtureData/String allowlist with resource and existing JVM filters",
+  "limits": {
+    "bytes": 4096,
+    "depth": 8,
+    "references": 32,
+    "array_length": 16
+  },
+  "claim": "unintended callback execution; does not establish arbitrary code execution",
+  "label": "cwe502-java-deserialization (corrected variant)",
+  "corrects": "cwe502-java-deserialization",
+  "expected_signal": "none",
+  "corrected_behavior": "A serialized class outside the allowlist is rejected by the object input filter and its callback does not run."
+}

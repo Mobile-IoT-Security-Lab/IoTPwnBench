@@ -1,0 +1,11 @@
+CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+
+Vulnerable C Binaries — Integer Overflow
+CWE-190: Integer Overflow or Wraparound
+For offline, authorized firmware-analysis research with synthetic data only.
+The local native C utility deliberately multiplies a validated uint32_t input
+by 1024 without arithmetic overflow validation. Input 4194304 wraps to zero
+and incorrectly passes the simulated 4096-byte capacity check.
+Only numerical output is produced; no data is allocated, copied or indexed
+using the wrapped result. No files, network or privileges are needed.
+The corrected helper computes the total in 64 bits, so no input wraps.

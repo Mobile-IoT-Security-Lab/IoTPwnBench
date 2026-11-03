@@ -6,11 +6,16 @@ IOTBENCH_DEVICE_INSTALL = ""
 IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
 
 python iotbench_native_connection_guard() {
+    # A corrected twin sets IOTBENCH_TWIN to 1 and installs the -fixed package,
+    # with IOTBENCH_CWE reset to 'none' and the original kept in IOTBENCH_CORRECTS_CWE.
     expected = 'cwe020-native-connection-string'
+    twin = (d.getVar('IOTBENCH_VULN_INSTALL') or '').endswith('-fixed')
+    if twin:
+        expected = expected + '-fixed'
     if (d.getVar('IOTBENCH_BUILD_MODE') != 'fixture' or
             d.getVar('IOTBENCH_ENABLE_CONNECTION_FIXTURE') != '1'):
         bb.fatal('Native connection fixtures require explicit opt-in and fixture mode')
-    if (d.getVar('IOTBENCH_CWE') != 'CWE-20' or
+    if (d.getVar('IOTBENCH_CWE') != ('none' if twin else 'CWE-20') or
             d.getVar('IOTBENCH_VULN_INSTALL') != expected or
             set((d.getVar('IMAGE_INSTALL') or '').split()) != {'packagegroup-core-boot', expected}):
         bb.fatal('Native connection fixtures require exactly one CWE-20 package and no device daemons')
@@ -37,6 +42,7 @@ python iotbench_native_connection_metadata() {
     manifest = pathlib.Path(d.getVar('IMAGE_MANIFEST'))
     if manifest.exists():
         packages = [line.split()[0] for line in manifest.read_text().splitlines() if line.split()]
-        if [p for p in packages if p.startswith('cwe')] != ['cwe020-native-connection-string']:
+        expected = d.getVar('IOTBENCH_VULN_INSTALL')
+        if [p for p in packages if p.startswith('cwe')] != [expected]:
             bb.fatal('Unexpected vulnerability packages in native connection fixture image')
 }

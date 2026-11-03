@@ -1,0 +1,22 @@
+{
+  "label": "Vulnerable C Binaries — Integer Overflow (corrected variant)",
+  "cwe": "CWE-190",
+  "classification": "CWE-190: Integer Overflow or Wraparound",
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "executable": "@BINDIR@/fixture-batch-size",
+  "source": "fixture-batch-size.c",
+  "installed_source": "@DATADIR@/iotbench/integer-overflow/fixture-batch-size.c",
+  "input": "argv[1]: one nonempty unsigned decimal value representable as uint32_t",
+  "record_size": 1024,
+  "max_capacity": 4096,
+  "normal": {
+    "input": "2",
+    "mathematical_total": 2048,
+    "stored_total": 2048,
+    "decision": "accepted",
+    "exit": 0
+  },
+  "corrects": "cwe190-integer-overflow",
+  "expected_signal": "none",
+  "corrected_behavior": "The total is computed in 64 bits, so 4194304 gives 4294967296 and the batch exceeds capacity."
+}

@@ -1,5 +1,8 @@
 IOTBENCH_CWE = "CWE-798"
-IOTBENCH_VULN_INSTALL = "cwe798-embedded-auth-${IOTBENCH_EMBEDDED_AUTH_VARIANT}"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe798-embedded-auth-${IOTBENCH_EMBEDDED_AUTH_VARIANT}${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE ?= "0"
 IOTBENCH_EMBEDDED_AUTH_LAYER := "${THISDIR}/.."
@@ -22,7 +25,7 @@ python iotbench_embedded_auth_guard() {
             d.getVar('MACHINE'), d.getVar('IOTBENCH_EMBEDDED_AUTH_VARIANT'))
     except ValueError as error:
         bb.fatal(str(error))
-    expected = 'cwe798-embedded-auth-' + d.getVar('IOTBENCH_EMBEDDED_AUTH_VARIANT')
+    expected = 'cwe798-embedded-auth-' + d.getVar('IOTBENCH_EMBEDDED_AUTH_VARIANT') + d.getVar('IOTBENCH_TWIN_SUFFIX')
     if (d.getVar('IOTBENCH_VULN_INSTALL') != expected or
             (d.getVar('IMAGE_INSTALL') or '').split() != ['packagegroup-core-boot', expected]):
         bb.fatal('Embedded auth images require exactly one fixture and the minimal boot package group')
@@ -45,7 +48,9 @@ python iotbench_embedded_auth_metadata() {
     for name in ('device.conf', 'peripherals.conf'):
         (destination / name).write_bytes((layer / 'recipes-devices' / device / 'files' / name).read_bytes())
         (destination / name).chmod(0o644)
-    tests = runpy.run_path(str(layer / 'recipes-vulns/cwe798-embedded-auth/files/fixture-verify.py'))
+    # The corrected twin is verified against its own inventory, which names the secret slot only.
+    files = 'files-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else 'files'
+    tests = runpy.run_path(str(layer / 'recipes-vulns/cwe798-embedded-auth' / files / 'fixture-verify.py'))
     try:
         tests['verify'](rootfs, d.getVar('IOTBENCH_EMBEDDED_AUTH_VARIANT'), firmware=True)
     except (ValueError, AssertionError) as error:

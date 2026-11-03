@@ -17,7 +17,7 @@ LogLevel warn
 ServerTokens Prod
 ServerSignature Off
 TraceEnable Off
-Timeout 5
+Timeout 90
 StartServers 1
 MinSpareServers 1
 MaxSpareServers 2

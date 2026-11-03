@@ -25,6 +25,9 @@ set -eu
 FIRMWARE="${FIRMWARE:-router-cwe078-os-command-injection}"
 MACHINE="${YOCTO_MACHINE:-qemuarm64}"
 IMAGE="iotbench-${FIRMWARE}"
+# A corrected twin (id ending in -fixed) exposes the same services as the
+# vulnerable image it mirrors.
+FIRMWARE_KIND="${FIRMWARE%-fixed}"
 DEPLOY_DIR="$(dirname -- "$0")/../deploy-images/${FIRMWARE}/${MACHINE}"
 ROOTFS="${DEPLOY_DIR}/${IMAGE}-${MACHINE}.rootfs.ext4"
 ROOTFS_ARCHIVE="${ROOTFS}.zst"
@@ -40,7 +43,7 @@ NETDEV="user,id=net0,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80"
 EXTRA_ENDPOINT=""
 
 # Serial-only fixtures have no network device or forwarded ports.
-case "$FIRMWARE" in
+case "$FIRMWARE_KIND" in
     *-cwe502-java-deserialization)
         NETDEV=""
         MEMORY=1024
@@ -77,7 +80,7 @@ case "$FIRMWARE" in
         ;;
 esac
 
-case "${FIRMWARE}" in
+case "${FIRMWARE_KIND}" in
     *-cwe502-java-deserialization) ;;
     *-cwe078-java-os-command-injection|*-cwe077-java-app-command-injection) ;;
     *-cwe061-native-symlink-following) ;;
@@ -113,7 +116,7 @@ case "${FIRMWARE}" in
 esac
 
 # MQTT internal-file fixtures add a broker to HTTP and Modbus device profiles.
-case "${FIRMWARE}" in
+case "${FIRMWARE_KIND}" in
     router-cwe862-mqtt-internal-files|ipcamera-cwe862-mqtt-internal-files|plc-cwe862-mqtt-internal-files)
         MQTT_PORT="${QEMU_MQTT_PORT:-1883}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${MQTT_PORT}-:1883"
@@ -121,7 +124,7 @@ case "${FIRMWARE}" in
         ;;
 esac
 
-case "${FIRMWARE}" in
+case "${FIRMWARE_KIND}" in
     *-cwe862-coap-internal-files)
         COAP_PORT="${QEMU_COAP_PORT:-5683}"
         NETDEV="${NETDEV},hostfwd=udp:127.0.0.1:${COAP_PORT}-:5683"
@@ -142,7 +145,7 @@ case "${FIRMWARE}" in
         ;;
 esac
 
-case "${FIRMWARE}" in
+case "${FIRMWARE_KIND}" in
     smartbulb-cwe122-zcl-heap-overflow)
         ZCL_PORT="${QEMU_ZCL_PORT:-17754}"
         NETDEV="${NETDEV},hostfwd=tcp:127.0.0.1:${ZCL_PORT}-:17754"
@@ -203,7 +206,7 @@ CPU_ARG=""
 
 echo "Firmware: ${FIRMWARE} (${MACHINE})"
 IP_APPEND="ip=dhcp"
-case "${FIRMWARE}" in
+case "${FIRMWARE_KIND}" in
     *-cwe120-service-buffer-overflow)
         # The CWE-120 fixture is exclusively local, including during validation.
         set -- -nic none

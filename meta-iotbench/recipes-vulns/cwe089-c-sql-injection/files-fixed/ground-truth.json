@@ -1,0 +1,24 @@
+{
+  "label": "Vulnerable C Binaries — SQL injection (corrected variant)",
+  "cwe": "CWE-89",
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "executable": "@BINDIR@/fixture-db-query",
+  "source": "fixture-db-query.c",
+  "database": "@DATADIR@/iotbench/c-sql-injection/fixture.db",
+  "table": "fixture_records",
+  "columns": [
+    "id",
+    "record_name",
+    "record_value",
+    "visibility"
+  ],
+  "source_expression": "argv[1] -> input",
+  "normal_input": "public",
+  "normal_output": [
+    "public|SYNTHETIC_PUBLIC_FIXTURE_DATA"
+  ],
+  "scope": "Fixed read-only database, single SELECT, synthetic-table-only authorizer, disabled extension loading, bounded work and output; no privileges or networking",
+  "corrects": "cwe089-c-sql-injection",
+  "expected_signal": "none",
+  "corrected_behavior": "The input is bound as a SQL value, so the injection input matches no record and nothing is returned."
+}
