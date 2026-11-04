@@ -77,7 +77,7 @@ For CLI tests, run `echo "exit=$?"` **immediately after** the command you want t
 | [Test 7: REST internal files](#test-7) | `cwe022-rest-internal-files` | Guest / isolated host | Config route returns the restricted synthetic marker; control denies it |
 | [Test 8: Apache applications](#test-8) | `cwe<CWE>-apache-web` | Guest / isolated host | Selected defect produces its marker or unauthorized state change |
 | [Test 9: C path and filename](#test-9) | `cwe022-native-path-traversal`, `cwe020-native-filename-validation` | Guest / isolated namespace | Disallowed synthetic file is read; outer containment or a nonmatching filename is rejected |
-| [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the out-of-bounds write; corrected control rejects the input |
+| [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the first out-of-bounds write from a valid 65-byte frame |
 | [Test 11: C connection string](#test-11) | `cwe020-native-connection-string` | Guest / host | Injected field changes SQLite from read-only to writable capability |
 | [Test 12: C symbolic links](#test-12) | `cwe061-native-symlink-following` | Guest / isolated host | Fixed file follows the synthetic symlink; corrected control denies it |
 | [Test 13: Java commands](#test-13) | `cwe078-java-os-command-injection`, `cwe077-java-app-command-injection` | Guest / isolated host | Selected interpreter creates its extra synthetic marker |
@@ -1323,3 +1323,215 @@ recipes provide the corresponding fixture for the other device categories.
 > not deploy these inputs or configurations outside this benchmark.
 
 Source: [native-path-fixture](../meta-iotbench/recipes-vulns/native-path-fixture/).
+
+<a id="native-c-buffer-overflow-cwe-787-cwe-20-cwe-119"></a>
+<a id="test-10"></a>
+
+## Test 10: Vulnerable C binaries — buffer overflow — CWE-787/CWE-20/CWE-119
+
+### Build, boot and manual testing
+
+**What this tests.** The actual native AArch64 fixture accepts an exact binary
+stdin frame: a two-byte big-endian length followed by printable bytes. It
+validates the transport length only (maximum 256), then copies that many bytes
+into a 64-byte global configuration array. This manual procedure uses the
+ASan companion from the built firmware so the first out-of-bounds write is
+observable without relying on undefined behavior from the normal ELF.
+
+**Build — host:**
+
+Run this from the repository root. `IOTBENCH_NATIVE_BUFFER_ASAN=1` installs
+the diagnostic companion used below; the selected image enables its own fixture
+mode and opt-in only.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe787-native-buffer-overflow
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+docker compose run --rm \
+  -e FIRMWARE="$TEST_FIRMWARE" \
+  -e IOTBENCH_BUILD_MODE=fixture \
+  -e IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1 \
+  -e IOTBENCH_NATIVE_BUFFER_ASAN=1 yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This serial-only fixture starts QEMU without a network device. Log in with
+`root` / `routeradmin`; run the remaining commands in that guest console.
+
+**64-byte baseline — guest:**
+
+```sh
+{ printf '\000\100'; printf '%064d' 0; } | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  env ASAN_OPTIONS='detect_leaks=0:halt_on_error=1:abort_on_error=0:symbolize=1:exitcode=86' \
+  /usr/bin/fixture-buffer-write-asan
+echo "baseline_exit=$?"
+```
+
+Expected: the fixture warning, then `OK 64 3072` and `baseline_exit=0`.
+`\000\100` is the big-endian length `64`; `printf '%064d' 0` supplies exactly
+64 printable `0` bytes. This is the safe boundary of the actual destination.
+
+**65-byte witness — guest:**
+
+```sh
+{ printf '\000\101'; printf '%065d' 0; } | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  env ASAN_OPTIONS='detect_leaks=0:halt_on_error=1:abort_on_error=0:symbolize=1:exitcode=86' \
+  /usr/bin/fixture-buffer-write-asan 2>/tmp/iotbench-cwe787-asan.log
+echo "witness_exit=$?"
+grep -E 'global-buffer-overflow|WRITE of size 1|fixture-buffer-write.c:51' \
+  /tmp/iotbench-cwe787-asan.log
+```
+
+Expected: no normal `OK` line, `witness_exit=86`, and all three ASan witnesses:
+`global-buffer-overflow`, `WRITE of size 1`, and
+`fixture-buffer-write.c:51`. `\000\101` declares 65 printable `0` bytes: the
+parser accepts the frame, while the 65th indexed store is the first write past
+the 64-byte global array. Repeat this same 65-byte block once; it must again
+exit `86` and report the same ASan class, write size, and source line.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe787-native-buffer-overflow` image recipe. It retains device
+metadata but installs only `cwe787-native-buffer-overflow`, with no device
+daemon or network listener. The installed normal and ASan binaries are both
+compiled from `fixture-buffer-write.c`; the latter only makes the same
+`configuration[index] = payload[index]` store observable. The one missing
+check is `length <= sizeof(configuration)`: CWE-787 is the primary label,
+CWE-20 is the contributing validation failure, and CWE-119 is the broader
+category.
+
+**✅ Runtime evidence.** The `router`/`qemuarm64` ASan-enabled image was built
+with the normal Compose workflow and its exported root filesystem contained
+both `/usr/bin/fixture-buffer-write` and
+`/usr/bin/fixture-buffer-write-asan`, root-owned and mode `0755`. In QEMU, the
+64-byte frame returned `OK 64 3072` with exit `0`; the 65-byte frame returned
+exit `86` and ASan reported a global-buffer-overflow, one-byte write, and
+`fixture-buffer-write.c:51` on two consecutive manual runs. This evidence is
+limited to that built router/QEMU variant; the same shared package and image
+pattern provide the fixture for the other device categories.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The input is a local synthetic configuration frame; it starts no service,
+> enables no networking, and is not an exploitation procedure. Do not deploy
+> this configuration or reuse it outside the benchmark.
+
+Source: [cwe787-native-buffer-overflow](../meta-iotbench/recipes-vulns/cwe787-native-buffer-overflow/).
+
+<a id="native-connection-string-injection-cwe-20"></a>
+<a id="test-11"></a>
+
+## Test 11: Vulnerable C binaries — Connection String Injection — CWE-20
+
+### Build, boot and manual testing
+
+**What this tests.** The actual native C binary builds a SQLite `file:` URI
+from a caller-controlled `cache` field and an intended fixed `mode=ro` suffix.
+The input is a two-byte big-endian length followed by printable ASCII. The
+fixture creates a new private synthetic database for every invocation; no
+network service, existing database or external endpoint is involved.
+
+**Build — host:**
+
+Run from the repository root. The named scenario selects the fixture-only build
+mode and its connection-fixture opt-in automatically.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe020-native-connection-string
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This is a serial-only fixture: QEMU starts with no NIC. Log in with `root` /
+`routeradmin`, then run the remaining commands in the guest console.
+
+**Baseline — guest:**
+
+```sh
+printf '\000\007private' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "baseline_exit=$?"
+```
+
+Expected: the fixture notice, then
+`OK readonly=1 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`baseline_exit=0`. The normal `private` cache value leaves the intended
+read-only SQLite connection in effect.
+
+**Connection-string injection — guest:**
+
+```sh
+printf '\000\020private&mode=rw#' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "injected_exit=$?"
+```
+
+Expected: the same synthetic marker but
+`OK readonly=0 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`injected_exit=0`. `\000\020` declares the 16-byte value
+`private&mode=rw#`; its `#` starts a URI fragment, so SQLite applies the
+attacker-controlled `mode=rw` and ignores the intended trailing `&mode=ro`.
+
+**Repeat control — guest:**
+
+```sh
+printf '\000\007private' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "repeat_baseline_exit=$?"
+```
+
+Expected: again `OK readonly=1 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`repeat_baseline_exit=0`. Each process creates and removes its own private
+database, so the result returns to the normal read-only state. Repeating the
+injected command above consistently returns `readonly=0`.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe020-native-connection-string` image recipe that installs only
+`cwe020-native-connection-string` plus its device metadata. The executable's
+data flow is `stdin` -> `read_cache()` -> `snprintf()` URI construction ->
+`sqlite3_open_v2()` -> `sqlite3_db_readonly()`. The sole intentional defect is
+missing exact validation/URI encoding of the `cache` field; the database path,
+SQL query and Unix VFS are fixed. The helper rejects root execution, runs with
+matching unprivileged IDs, enables `no_new_privs` and seccomp denial of socket,
+connect and exec syscalls.
+
+**✅ Runtime evidence.** On 2026-11-04, the `router`/`qemuarm64` image built and
+exported successfully with the normal Compose workflow. Its compressed ext4
+passed `zstd -t`; offline inspection found root-owned mode `0755`
+`/usr/bin/fixture-connection` and its installed source/ground truth. In the
+disposable serial-only QEMU guest, the manual baseline returned `readonly=1`,
+the concrete injected field returned `readonly=0`, the baseline reset to
+`readonly=1`, and a repeated injected field returned `readonly=0`; all four
+commands exited 0. Runtime evidence is limited to this built router/QEMU
+variant. The eleven recipe inclusions were inspected and share the same package
+and fixture configuration.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The input changes capability only for a newly created private SQLite database;
+> it starts no service, reaches no network and provides no persistence or
+> post-exploitation path. Do not deploy this configuration or reuse the input
+> outside this benchmark.
+
+Source: [cwe020-native-connection-string](../meta-iotbench/recipes-vulns/cwe020-native-connection-string/).
