@@ -1535,3 +1535,115 @@ and fixture configuration.
 > outside this benchmark.
 
 Source: [cwe020-native-connection-string](../meta-iotbench/recipes-vulns/cwe020-native-connection-string/).
+
+<a id="native-c-symbolic-link-following-cwe-61-and-cwe-59"></a>
+<a id="test-12"></a>
+
+## Test 12: Vulnerable C binaries — symbolic-link following — CWE-61/CWE-59
+
+### Build, boot and manual testing
+
+**What this tests.** The actual target C handler reads the fixed
+`public.cfg` entry from a pinned `allowed/` directory. The existing
+`isolate-path` manual entry copies only the two fixed synthetic resources into
+a fresh unprivileged tmpfs namespace. Its concrete `ordinary` and `symlink`
+arguments select either the ordinary file or the pre-established
+`public.cfg -> ../sentinel.txt` entry before the C handler opens it. The
+one-shot terminal entry then calls the same `retrieve()` sink as the Unix
+socket service; it uses no Python client, network listener, or caller-selected
+filename.
+
+**Build — host:**
+
+Run from the repository root. Selecting this scenario enables its own
+fixture-only build configuration automatically.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe061-native-symlink-following
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This is a serial-only fixture: QEMU starts with no NIC. Log in with `root` /
+`routeradmin`, then run the remaining commands in the guest console.
+
+**Ordinary-file baseline — guest:**
+
+```sh
+su -s /bin/sh iotsymlink -c '
+root=$(mktemp -d /tmp/iotbench-symlink.XXXXXX) || exit 1
+/usr/share/iotbench/native-symlink/bin/isolate-path --manual-request \
+  /usr/share/iotbench/native-symlink "$root" ordinary
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "baseline_exit=$?"
+```
+
+Expected: `ENTRY ordinary public.cfg`, followed by `OK 39` and
+`SYNTHETIC_CWE61_ORDINARY_CONFIGURATION`, then `baseline_exit=0`. The ordinary
+entry is the allowed boundary condition.
+
+**Pre-established symbolic-link witness and repeat — guest:**
+
+```sh
+for label in witness repeat; do
+  su -s /bin/sh iotsymlink -c '
+root=$(mktemp -d /tmp/iotbench-symlink.XXXXXX) || exit 1
+/usr/share/iotbench/native-symlink/bin/isolate-path --manual-request \
+  /usr/share/iotbench/native-symlink "$root" symlink
+status=$?
+rmdir "$root"
+exit "$status"
+'
+  printf '%s_exit=%s\n' "$label" "$?"
+done
+```
+
+Expected on both iterations: `ENTRY symlink public.cfg -> ../sentinel.txt`,
+then `OK 30` and `SYNTHETIC_CWE61_SENTINEL_ONLY`, with exit `0`. The launcher
+creates the link before the target C process starts, while the process pins
+the parent directory. The vulnerable `openat()` lacks `O_NOFOLLOW`, so it
+follows only that fixed final-component link and reads the synthetic sentinel.
+Each invocation receives a new private tmpfs, so the repeated result confirms
+that no guest or host state is retained.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe061-native-symlink-following` image recipe that installs only
+`cwe061-native-symlink-following` plus device metadata. Its static-PIE target
+ELF remains executable after the existing launcher pivots into the minimal
+tmpfs. The only intentional defect is omission of `O_NOFOLLOW` on the fixed
+`public.cfg` final component; the corrected twin uses the same manual input
+but refuses the link with `ERR DENIED`. The test never accepts a path from the
+researcher and cannot reach files outside its disposable synthetic namespace.
+
+**✅ Runtime evidence.** On 2026-11-04, the normal Compose build and export of
+the `router`/`qemuarm64` vulnerable image succeeded. Its compressed ext4
+passed `zstd -t`; offline inspection found the root-owned mode-`0755` target
+ELF and fixture resources. In the disposable QEMU serial guest, the documented
+`ordinary` request returned `OK 39` and the ordinary marker; two independent
+`symlink` requests each returned `OK 30` and the sentinel with exit `0`. The
+same router fixed twin built and booted successfully: its ordinary request
+remained accepted, while its pre-established `symlink` request returned
+`ERR DENIED`. No Python runner or network interface was used. Runtime evidence
+is limited to these built router/QEMU images; the eleven thin recipes reuse the
+same package and explicit fixture configuration.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The link and both resources exist solely inside a fresh private tmpfs; no
+> network service, persistence, external file, or exploitation chain is
+> involved. Do not deploy this configuration or reuse its input outside this
+> benchmark.
+
+Source: [cwe061-native-symlink-following](../meta-iotbench/recipes-vulns/cwe061-native-symlink-following/).

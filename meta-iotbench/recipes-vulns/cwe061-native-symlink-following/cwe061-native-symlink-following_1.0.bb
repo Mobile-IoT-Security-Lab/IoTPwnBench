@@ -30,7 +30,11 @@ python __anonymous() {
 
 do_compile[vardeps] += "IOTBENCH_BUILD_MODE IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE MACHINE"
 do_compile() {
+    # The normal request handler runs after isolate-path pivots into a minimal
+    # tmpfs root. Static PIE keeps the real target ELF manually executable
+    # there without staging a guest loader, libraries, or Python runtime.
     ${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra -Werror \
+        -static-pie \
         -DIOTBENCH_SYMLINK_FIXTURE_ENABLED=1 ${S}/fixture-symlink.c -o ${B}/fixture-symlink-cwe061
     ${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra -Werror \
         ${S}/isolate-path.c -o ${B}/isolate-path
