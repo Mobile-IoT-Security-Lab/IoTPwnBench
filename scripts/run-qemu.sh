@@ -65,7 +65,7 @@ case "$FIRMWARE" in
         ;;
     *-cwe022-native-path-traversal|*-cwe020-native-filename-validation)
         NETDEV=""
-        EXTRA_ENDPOINT="Native path fixture: run the isolated socket tests from the guest serial console"
+        EXTRA_ENDPOINT="Native path fixture: run isolated native requests from the guest serial console"
         ;;
     *-cwe798-password-leak-*)
         NETDEV=""

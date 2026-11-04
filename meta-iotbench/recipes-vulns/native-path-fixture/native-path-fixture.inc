@@ -33,7 +33,13 @@ python __anonymous() {
 
 do_compile[vardeps] += "IOTBENCH_BUILD_MODE IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE MACHINE PATH_FIXTURE_CWE"
 do_compile() {
+    # The normal fixture ELF runs after isolate-path pivots into a deliberately
+    # minimal tmpfs root. Link that actual request handler as static PIE so a
+    # researcher can exercise it manually there without staging a guest loader
+    # or a Python runtime. The optional ASan diagnostic remains dynamically
+    # linked and is used only by the existing regression runner.
     ${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra -Werror \
+        -static-pie \
         -DIOTBENCH_PATH_FIXTURE_ENABLED=1 -DPATH_FIXTURE_CWE=${@int(d.getVar('PATH_FIXTURE_CWE'))} \
         ${S}/fixture-path.c -o ${B}/fixture-path-cwe${PATH_FIXTURE_CWE}
     ${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra -Werror \

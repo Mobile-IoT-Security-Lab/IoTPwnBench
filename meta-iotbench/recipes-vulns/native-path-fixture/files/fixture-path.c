@@ -94,6 +94,24 @@ static int request_path(int client, char file[PATH_LIMIT + 1])
     return 0;
 }
 
+/* The manual entry point uses the same accepted path alphabet and size limit
+ * as the AF_UNIX protocol. It exists only after the binary has verified the
+ * disposable namespace below; it is not a host or production interface.
+ */
+static int manual_path(const char *input, char file[PATH_LIMIT + 1])
+{
+    size_t size = strnlen(input, PATH_LIMIT + 1);
+    if (!size || size > PATH_LIMIT || input[0] == '/') return -1;
+    for (size_t i = 0; i < size; ++i) {
+        unsigned char c = (unsigned char)input[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-' || c == '.' || c == '/')) return -1;
+    }
+    memcpy(file, input, size);
+    file[size] = '\0';
+    return 0;
+}
+
 #if PATH_FIXTURE_CWE == 20
 static int filename_policy(const char *file)
 {
@@ -161,6 +179,25 @@ static void handle_request(int client, int rootfd)
         (void)send_all(client, body, size);
 }
 
+/* This intentionally stays a one-request CLI: the same retrieve() path used
+ * by the socket service produces the response, while researchers can supply a
+ * concrete terminal argument without a Python client or test harness.
+ */
+static int handle_manual_request(int rootfd, const char *input)
+{
+    char file[PATH_LIMIT + 1], body[FILE_LIMIT], header[40];
+    size_t size = 0;
+    const char *error = "ERR INVALID\n";
+    if (!manual_path(input, file)) error = retrieve(rootfd, file, body, &size);
+    if (error) return fputs(error, stdout) == EOF ? 77 : 0;
+    int n = snprintf(header, sizeof(header), "OK %zu\n", size);
+    if (n <= 0 || (size_t)n >= sizeof(header) ||
+        fwrite(header, 1, (size_t)n, stdout) != (size_t)n ||
+        fwrite(body, 1, size, stdout) != size || fflush(stdout) == EOF)
+        return 77;
+    return 0;
+}
+
 static int isolated(void)
 {
     struct statfs fs;
@@ -184,7 +221,9 @@ static int isolated(void)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2 || strcmp(argv[1], "--isolated-fixture")) return 77;
+    int manual = argc == 4 && !strcmp(argv[1], "--isolated-fixture") &&
+                 !strcmp(argv[2], "--manual-request");
+    if (!(argc == 2 && !strcmp(argv[1], "--isolated-fixture")) && !manual) return 77;
     if (!isolated()) { fputs("Requires the isolated test runner\n", stderr); return 77; }
     int fsfd = open("/fixture/fs", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (fsfd < 0) { perror("fixture fs"); return 77; }
@@ -198,6 +237,11 @@ int main(int argc, char **argv)
     close(fsfd);
     int rootfd = allowed;
 #endif
+    if (manual) {
+        int status = handle_manual_request(rootfd, argv[3]);
+        close(rootfd);
+        return status;
+    }
     struct sockaddr_un address = {.sun_family = AF_UNIX};
     memcpy(address.sun_path, "/run/path.sock", sizeof("/run/path.sock"));
     umask(0077);

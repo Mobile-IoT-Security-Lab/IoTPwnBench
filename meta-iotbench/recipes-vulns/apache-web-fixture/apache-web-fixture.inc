@@ -3,13 +3,14 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI = "file://LICENSE file://app.cgi file://httpd.conf.in file://isolate.c \
-           file://fixture-build.py file://test-fixtures.py file://browser.py \
+           file://fixture-build.py file://manual-launch.sh file://manual-server.sh \
+           file://test-fixtures.py file://browser.py \
            file://variants/cwe${APACHE_FIXTURE_CWE}.py"
 S = "${UNPACKDIR}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_APACHE_FIXTURE ?= "0"
 FIXTURE_BASE = "${datadir}/iotbench/apache-fixture"
-RDEPENDS:${PN} = "apache2 python3-core python3-modules ldd"
+RDEPENDS:${PN} = "apache2 python3-core python3-modules ldd curl sqlite3 util-linux-nsenter"
 inherit useradd
 USERADD_PACKAGES = "${PN}"
 USERADD_PARAM:${PN} = "--system --user-group --home /nonexistent --no-create-home --shell /bin/sh iotapache"
@@ -35,6 +36,8 @@ do_install() {
     for name in LICENSE app.cgi httpd.conf.in fixture-build.py test-fixtures.py browser.py; do
         install -m 0644 ${S}/$name ${D}${FIXTURE_BASE}/$name
     done
+    install -m 0755 ${S}/manual-launch.sh ${D}${FIXTURE_BASE}/manual-launch.sh
+    install -m 0755 ${S}/manual-server.sh ${D}${FIXTURE_BASE}/manual-server.sh
     install -m 0644 ${S}/variants/cwe${APACHE_FIXTURE_CWE}.py ${D}${FIXTURE_BASE}/scenario.py
     install -m 0755 ${B}/isolate ${D}${FIXTURE_BASE}/isolate
     printf '{"cwe":"%s"}\n' '${APACHE_FIXTURE_CWE}' > ${D}${FIXTURE_BASE}/variant.json

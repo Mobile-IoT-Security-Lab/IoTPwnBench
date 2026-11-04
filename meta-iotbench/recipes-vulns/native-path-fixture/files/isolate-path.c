@@ -80,9 +80,10 @@ static void copy_tree(int source, int target)
 
 int main(int argc, char **argv)
 {
-    if (argc != 4 || strcmp(argv[1], "--isolated-fixture") || getuid() == 0 ||
-        geteuid() != getuid() || getegid() != getgid()) {
-        fputs("Requires --isolated-fixture STAGE EMPTY_ROOT and an ordinary caller\n", stderr);
+    int manual = argc == 5 && !strcmp(argv[1], "--manual-request");
+    if (!((argc == 4 && !strcmp(argv[1], "--isolated-fixture")) || manual) ||
+        getuid() == 0 || geteuid() != getuid() || getegid() != getgid()) {
+        fputs("Requires --isolated-fixture STAGE EMPTY_ROOT or --manual-request STAGE EMPTY_ROOT PATH and an ordinary caller\n", stderr);
         return 77;
     }
     uid_t uid = getuid(); gid_t gid = getgid();
@@ -107,9 +108,21 @@ int main(int argc, char **argv)
     tmpfs(argv[3], "mode=0755,size=384m");
     int target = open(argv[3], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (source < 0 || target < 0) die("staged runtime");
-    copy_tree(source, target);
+    if (manual) {
+        if (mkdirat(target, "fixture", 0755)) die("manual fixture directory");
+        int fixture = openat(target, "fixture", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (fixture < 0) die("manual fixture directory");
+        copy_tree(source, fixture);
+        close(fixture);
+    } else {
+        copy_tree(source, target);
+    }
     close(source); close(target);
-    if (chdir(argv[3]) || syscall(SYS_pivot_root, ".", "oldroot") || chdir("/")) die("pivot_root");
+    if (chdir(argv[3])) die("fixture root");
+    /* The automated stage has these mountpoints; a manual stage starts empty. */
+    if (manual && (mkdir("oldroot", 0700) || mkdir("proc", 0555) ||
+                   mkdir("run", 0700) || mkdir("tmp", 0700))) die("manual root");
+    if (syscall(SYS_pivot_root, ".", "oldroot") || chdir("/")) die("pivot_root");
     if (mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)) die("private proc");
     if (umount2("/oldroot", MNT_DETACH)) die("detach host root");
     tmpfs("/run", "mode=0700,size=1m,uid=1000,gid=1000");
@@ -133,6 +146,24 @@ int main(int argc, char **argv)
     long maxfd = sysconf(_SC_OPEN_MAX);
     if (maxfd < 0) die("descriptor limit");
     for (int fd = 3; fd < maxfd; ++fd) close(fd);
+    if (manual) {
+        const char *binary = NULL;
+        if (access("/fixture/bin/fixture-path-cwe022", X_OK) == 0)
+            binary = "/fixture/bin/fixture-path-cwe022";
+        if (access("/fixture/bin/fixture-path-cwe020", X_OK) == 0) {
+            if (binary) {
+                fputs("Fixture has more than one native path variant\n", stderr);
+                return 77;
+            }
+            binary = "/fixture/bin/fixture-path-cwe020";
+        }
+        if (!binary) {
+            fputs("Fixture has no native path variant\n", stderr);
+            return 77;
+        }
+        execl(binary, binary, "--isolated-fixture", "--manual-request", argv[4], (char *)NULL);
+        die("exec manual request");
+    }
     execl("/usr/bin/python3", "python3", "/fixture/test-session.py", (char *)NULL);
     die("exec tests");
 }
