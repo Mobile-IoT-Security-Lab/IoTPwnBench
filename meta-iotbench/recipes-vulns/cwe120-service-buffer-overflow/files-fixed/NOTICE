@@ -1,0 +1,4 @@
+CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+Ground truth: Vulnerable C Binaries — Buffer Overflow exposed via service interface
+Primary CWE-120; stack destination CWE-121. Authorized isolated offline research only.
+The corrected service refuses a label that does not fit in its buffer.

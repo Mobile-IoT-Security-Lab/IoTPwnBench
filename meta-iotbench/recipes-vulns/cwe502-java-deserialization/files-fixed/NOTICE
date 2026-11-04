@@ -1,0 +1,7 @@
+SYNTHETIC TEST FIXTURE ONLY - explicitly opt in; never deploy in production.
+CWE-502, with CWE-20 contributing: missing deserialization type allowlist.
+FixtureMarker.readObject records only an in-memory counter increment.
+This demonstrates unintended callback execution, not arbitrary code execution.
+Run only in the documented disposable unprivileged namespace sandbox, with
+copied runtime files, no host filesystem mounts and no external network access.
+The corrected fixture accepts only the expected types.

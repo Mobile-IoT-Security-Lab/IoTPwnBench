@@ -1,0 +1,3 @@
+# CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+# The argument wildcard also matches slashes, so the helper rejects dot components itself.
+fixturetest ALL=(root) NOPASSWD: @BINDIR@/iotbench-maintenance-read @FIXTURE_ROOT@/data/*

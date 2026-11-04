@@ -1,0 +1,10 @@
+require recipes-images/iotbench-image.inc
+require recipes-devices/smarthub/device-smarthub.inc
+IOTBENCH_EMBEDDED_AUTH_VARIANT = "connection-string"
+require recipes-images/iotbench-embedded-auth.inc
+
+SUMMARY = "IoTBench corrected twin - smarthub, CWE-798 embedded auth connection-string"
+DESCRIPTION = "Corrected twin of iotbench-smarthub-cwe798-embedded-auth-connection-string. The same device and service, with the weakness removed. No weakness is injected."
+IOTBENCH_TWIN = "1"
+IOTBENCH_CORRECTS_CWE := "${IOTBENCH_CWE}"
+IOTBENCH_CWE = "none"

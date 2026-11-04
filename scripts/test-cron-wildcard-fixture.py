@@ -13,6 +13,9 @@ import tempfile
 import textwrap
 import unittest
 
+# Stage files the way a Yocto build does, whatever umask the caller has.
+os.umask(0o022)
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / 'meta-iotbench'
 SLUG = 'cwe088-cronjob-wildcard-injection'
@@ -223,11 +226,11 @@ class FixtureTests(unittest.TestCase):
                 'recipes-devices/{0}/device-{0}.inc'.format(device),
                 'recipes-images/iotbench-cronjob-wildcard-injection.inc'])
         common = images / 'iotbench-cronjob-wildcard-injection.inc'
-        self.assertIn('IOTBENCH_VULN_INSTALL = "' + SLUG + '"', common.read_text())
+        self.assertIn('IOTBENCH_VULN_INSTALL = "' + SLUG + '${IOTBENCH_TWIN_SUFFIX}"', common.read_text())
         package = LAYER / 'recipes-vulns' / SLUG / (SLUG + '_1.0.bb')
         recipe = package.read_text()
         for expected in ('--shell /bin/false --password', '--uid 988', '--gid 988',
-                         'chown fixturefiles:fixturefiles', 'FILES:${PN} = "${FIXTURE_ROOT}"',
+                         'chown fixturefiles:fixturefiles', 'FILES:${PN} = "${FIXTURE_ROOT}',
                          'do_compile[vardeps]', 'do_install[vardeps]', '--target-paths'):
             self.assertIn(expected, recipe)
         truth = json.loads((SOURCE / 'ground-truth.json').read_text())

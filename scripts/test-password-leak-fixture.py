@@ -238,8 +238,12 @@ def integration_tests():
     devices = sorted(p.parent.name for p in (LAYER / 'recipes-devices').glob('*/device-*.inc'))
     expected = {'iotbench-' + d + '-cwe798-password-leak-' + v + '.bb'
                 for d, v in itertools.product(devices, LIB['VARIANTS'])}
-    check(expected == {p.name for p in recipes.glob('iotbench-*-cwe798-password-leak-*.bb')},
+    check(expected == {p.name for p in recipes.glob('iotbench-*-cwe798-password-leak-*.bb')
+                       if not p.stem.endswith('-fixed')},
           'Missing/extra device/variant image recipes')
+    twins = {name[:-len('.bb')] + '-fixed.bb' for name in expected}
+    check(twins == {p.name for p in recipes.glob('iotbench-*-cwe798-password-leak-*-fixed.bb')},
+          'Missing/extra corrected twin image recipes')
     for device, variant in itertools.product(devices, LIB['VARIANTS']):
         text = (recipes / ('iotbench-' + device + '-cwe798-password-leak-' + variant + '.bb')).read_text()
         for required in ('require recipes-images/iotbench-image.inc',
@@ -253,7 +257,7 @@ def integration_tests():
         check(text == 'require cwe798-password-leak.inc\nIOTBENCH_PASSWORD_LEAK_VARIANT = "'
               + variant + '"\n', 'Incorrect package variant wiring')
     for path in recipes.glob('*.bb'):
-        if path.name not in expected:
+        if path.name not in expected and path.name not in twins:
             check('cwe798-password-leak' not in path.read_text(), 'Fixture in another image')
 
     class SkipRecipe(ValueError):
@@ -279,7 +283,7 @@ def integration_tests():
             self.values = dict(IOTBENCH_BUILD_MODE=mode, IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE=enabled,
                                MACHINE=machine, IOTBENCH_PASSWORD_LEAK_VARIANT=variant,
                                THISDIR=str(SOURCE.parent), IOTBENCH_PASSWORD_LEAK_LAYER=str(LAYER),
-                               IOTBENCH_VULN_INSTALL=package,
+                               IOTBENCH_VULN_INSTALL=package, IOTBENCH_TWIN_SUFFIX='',
                                IMAGE_INSTALL=package + (' cwe999-other' if extra else ''))
 
         def getVar(self, name):

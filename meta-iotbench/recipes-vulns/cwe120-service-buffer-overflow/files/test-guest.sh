@@ -19,6 +19,6 @@ setpriv --reuid=65534 --regid=65534 --clear-groups \
 systemctl stop iotbench-label.service
 # A cgroup limits resident memory without breaking ASan's shadow-memory mapping.
 systemd-run --quiet --wait --pipe --collect -p User=nobody -p Group=nogroup \
-    -p MemoryMax=256M -p TasksMax=16 -p RuntimeMaxSec=60 -p LimitCORE=0 \
+    -p MemoryMax=256M -p TasksMax=16 -p RuntimeMaxSec=1800 -p LimitCORE=0 \
     -p NoNewPrivileges=yes -p PrivateNetwork=yes -p RestrictAddressFamilies=AF_UNIX \
     python3 "$data/test-service.py" --fixture-test

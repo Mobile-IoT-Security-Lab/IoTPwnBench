@@ -3479,7 +3479,7 @@ read-to-response data flow and absence of that access decision.
 | --- | --- |
 | Daemon | `/usr/bin/iotbench-coap-internal-files`, root:root `0755`, no SUID/SGID |
 | Startup | `/usr/lib/systemd/system/iotbench-coap-internal-files.service`; enabled for `multi-user.target` |
-| Service identity | `coapfixture`, UID/GID `992:992`, locked password and `/bin/false` shell |
+| Service identity | `coapfixture`, UID/GID `960:960`, locked password and `/bin/false` shell |
 | Internal directory | `/usr/share/iotbench/coap-internal-files/internal/`, root:coapfixture `0750` |
 | Internal files | `device.conf` and `maintenance.dat`, root:coapfixture `0640` |
 | Analysis source | `/usr/share/iotbench/coap-internal-files/handler.c`, `0644` |
@@ -3726,7 +3726,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -3799,7 +3799,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -3872,7 +3872,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -3945,7 +3945,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4018,7 +4018,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4091,7 +4091,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4164,7 +4164,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4237,7 +4237,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4310,7 +4310,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4383,7 +4383,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.
@@ -4456,7 +4456,7 @@ The CoAP implementation is `files/iotbench-coap-internal-files.c` under
 `meta-iotbench/recipes-vulns/cwe862-coap-internal-files/`, installed as
 `/usr/bin/iotbench-coap-internal-files`. Its systemd unit is
 `/usr/lib/systemd/system/iotbench-coap-internal-files.service`, enabled at
-`multi-user.target` and running as the locked `coapfixture` UID/GID 992.
+`multi-user.target` and running as the locked `coapfixture` UID/GID 960.
 It listens on guest UDP 5683. Relevant annotations are `handler.c`, `NOTICE`
 and `ground-truth.json` under `/usr/share/iotbench/coap-internal-files/`;
 device identity remains in `/etc/iotbench/device.conf`.

@@ -29,7 +29,7 @@ def verify(rootfs, variant, firmware=False, production=False):
         LIB['validate_build'](config['mode'], config['enabled'], config['machine'], config['variant'])
         if config['variant'] != variant:
             raise ValueError('Variant/config mismatch')
-        native = variant == 'native'
+        native = variant == 'c-source'
         allowed = {item['file'], 'fixture-lib.py', 'fixture-service.py', 'fixture-test.py', 'LICENSE',
                    'build-config.json', 'expected.json'} | ({'credential.so'} if native else set())
         if {p.name for p in root.iterdir()} != allowed:

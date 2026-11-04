@@ -14,6 +14,9 @@ import shutil
 import subprocess
 import tempfile
 
+# These tests parse tool output as text, so run the tools in the neutral locale.
+os.environ["LC_ALL"] = "C"
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / "meta-iotbench"
 SLUG = "cwe020-native-connection-string"

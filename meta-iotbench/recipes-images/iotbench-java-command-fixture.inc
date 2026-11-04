@@ -8,7 +8,9 @@ IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
 IMAGE_ROOTFS_EXTRA_SPACE = "524288"
 
 python iotbench_java_command_guard() {
-    allowed = {'cwe078-java-os-command-injection', 'cwe077-java-app-command-injection'}
+    # Corrected twins install the -fixed variant of either package.
+    allowed = {'cwe078-java-os-command-injection', 'cwe077-java-app-command-injection',
+               'cwe078-java-os-command-injection-fixed', 'cwe077-java-app-command-injection-fixed'}
     package = d.getVar('IOTBENCH_VULN_INSTALL')
     if (d.getVar('IOTBENCH_BUILD_MODE') != 'fixture' or
             d.getVar('IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE') != '1'):

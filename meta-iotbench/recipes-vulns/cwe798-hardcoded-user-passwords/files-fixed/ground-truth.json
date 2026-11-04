@@ -1,0 +1,16 @@
+{
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "ground_truth_label": "Hardcoded credentials — Hardcoding the user passwords",
+  "cwe": "CWE-798",
+  "weakness": "Use of Hard-coded Credentials",
+  "account_type": "synthetic local application account, not an OS login",
+  "credential_file": "@SYSCONFDIR@/iotbench/hardcoded-user-passwords/accounts.conf",
+  "consumer": "@BINDIR@/iotbench-fixture-auth",
+  "runtime_provisioning": false,
+  "network_required": false,
+  "authentication_effect": "prints a benign fixture-only marker; no OS access or privilege change",
+  "label": "cwe798-hardcoded-user-passwords (corrected variant)",
+  "corrects": "cwe798-hardcoded-user-passwords",
+  "expected_signal": "none",
+  "corrected_behavior": "No credential is shipped. The account database is empty, so the documented user name and password are rejected as FIXTURE_ACCOUNT_UNAVAILABLE."
+}

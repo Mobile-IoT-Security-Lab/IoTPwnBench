@@ -1,0 +1,35 @@
+{
+  "label": "Vulnerable C Binaries — Null Pointer Dereference (corrected variant)",
+  "cwe": "CWE-476",
+  "warning": "CORRECTED VARIANT — NO KNOWN WEAKNESS INJECTED — LOCAL TESTING ONLY",
+  "executable": "@BINDIR@/fixture-device-info",
+  "source": "fixture-device-info.c",
+  "source_expression": "argv[1] -> input",
+  "lookup_function": "lookup_record",
+  "nullable_assignment": "const fixture_record_t *record = lookup_record(input);",
+  "normal_input": "public",
+  "missing_input": "missing-record",
+  "records": [
+    {
+      "id": 1,
+      "name": "public",
+      "value": "SYNTHETIC_PUBLIC_FIXTURE_DATA"
+    },
+    {
+      "id": 2,
+      "name": "status",
+      "value": "SYNTHETIC_STATUS_FIXTURE_DATA"
+    }
+  ],
+  "scope": "Compiled synthetic records only; no files, network, commands, credentials or privileges",
+  "corrects": "cwe476-null-pointer-dereference",
+  "expected_signal": "none",
+  "missing_input_behavior": "exit status 1 and the message 'record not found' on stderr, no signal",
+  "flow": [
+    "input \"missing-record\"",
+    "lookup_record(input)",
+    "return NULL",
+    "NULL check",
+    "exit 1"
+  ]
+}

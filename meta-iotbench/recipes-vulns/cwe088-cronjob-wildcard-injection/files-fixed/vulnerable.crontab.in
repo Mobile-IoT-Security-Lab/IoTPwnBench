@@ -1,0 +1,5 @@
+# Corrected twin: operands are separated from options with --, so no file name acts as an option.
+# TEST ONLY: offline reference schedule for fixture-runner.py.
+# The live schedule is /etc/cron.d/iotbench-cron-wildcard-injection; this
+# root field is simulated only by the reference runner.
+*/5 * * * * root cd @INBOX@ && @HELPER@ --fixture-test -- *

@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=2ac030fbcf0423505c28549799c198f7"
 SRC_URI = "file://LICENSE file://iotbench-mqtt-internal-files.c file://iotbench-mqtt-internal-files.service file://mosquitto-iotbench.conf file://mosquitto-iotbench.service.conf file://iotbench-mqtt.service.conf file://iotbench-public.acl file://iotbench-publish.acl file://device.conf file://maintenance.dat file://NOTICE file://ground-truth.json"
 S = "${UNPACKDIR}"
 DEPENDS += "mosquitto"
-RDEPENDS:${PN} = "mosquitto"
+RDEPENDS:${PN} = "mosquitto mosquitto-clients"
 
 inherit systemd useradd
 

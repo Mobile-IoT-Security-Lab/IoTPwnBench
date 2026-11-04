@@ -1,0 +1,7 @@
+# Corrected twin of the native maintenance disk-usage report.
+# The caller's environment is reset and nothing is preserved, so POSIXLY_CORRECT
+# can no longer change the units of the report. NOSETENV keeps -E and
+# command-line assignments forbidden.
+Defaults:fixtureenv env_reset, !setenv
+Defaults:fixtureenv secure_path = "@BASE_BINDIR@"
+fixtureenv ALL=(root) NOPASSWD: NOSETENV: @BASE_BINDIR@/du -s /etc/iotbench, @BASE_BINDIR@/du -sk /etc/iotbench, @BASE_BINDIR@/id -u

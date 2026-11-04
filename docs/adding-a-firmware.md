@@ -163,6 +163,120 @@ IOTBENCH_VULN_INSTALL = "cwe<NNN>-<slug>"
 
 Add a row to the "Firmware catalog" table in the top-level `README.md`.
 
+## Corrected twins (the version without the weakness)
+
+Every vulnerable image can have a corrected twin, the same device and service
+with the weakness removed. A tool that is evaluated on the catalog must also be
+checked on code that is not vulnerable, otherwise a tool that reports a finding
+on every image would score perfectly. The twins are the negative ground truth.
+Write one for every new weakness module, and follow these rules, which are also
+the instructions to give a model that is asked to write the twin.
+
+**Rules for the corrected variant**
+
+1. Change only the weakness. The twin keeps the same files, ports, users,
+   services, dashboard module, name of the installed binary, and visible
+   behavior for valid input. A tool must not be able to tell the twin apart by
+   anything other than the removed weakness.
+2. Apply the standard remediation of the CWE, for example a bounds or NULL
+   check, an allow-list instead of a shell command, parameterized queries, a
+   non-root owner and a restrictive mode, an authentication check, no embedded
+   credential, a disabled service. Do not hide the problem by removing the
+   feature that exposed it.
+3. The documented payload of the vulnerable image must no longer produce its
+   signal. It must fail in a visible way, for example an error status, a
+   rejected request, or `404`. It must not crash the device.
+4. Remove the weakness wording from the twin (`INTENTIONALLY INSECURE`, the
+   marker comments, the `missing_protection` and `flow` fields of the ground
+   truth). The twin states that no weakness is injected.
+5. Write a negative ground truth. In `ground-truth.json` use
+   `"expected_signal": "none"`, add `"corrects": "<module>"`, and describe the
+   behavior for the payload of the original.
+6. The twin needs the same opt-in flag and the same build mode as its original,
+   because it builds the same fixture family. Nothing else is needed for this,
+   the scripts take the family from the firmware id without the `-fixed` suffix.
+
+**Mechanism**
+
+A corrected module is a recipe named `<module>-fixed_1.0.bb` in the directory of
+the vulnerable module. It starts from the vulnerable recipe and changes only
+what differs.
+
+```bitbake
+require recipes-vulns/cwe476-null-pointer-dereference/cwe476-null-pointer-dereference_1.0.bb
+
+SUMMARY = "IoTBench corrected variant - CWE-476 native C null pointer dereference"
+DESCRIPTION = "Corrected twin of cwe476-null-pointer-dereference. ..."
+
+# Files here replace the vulnerable ones of the same name.
+FILESEXTRAPATHS:prepend := "${THISDIR}/files-fixed:"
+```
+
+Put the corrected files in `files-fixed/` with the same names as the files
+they replace, and keep files that do not change in `files/`. When the fix is in
+the install step and not in a file, redefine `do_install` and `FILES:${PN}` in
+the `-fixed` recipe, as `cwe276-leaked-private-key-fixed_1.0.bb` does. When the
+vulnerable recipe cannot be reused, write the `-fixed` recipe on its own.
+
+The image of the twin is generated, never written by hand.
+
+```bash
+python3 scripts/gen-fixed-twins.py           # writes iotbench-<firmware>-fixed.bb
+python3 scripts/gen-fixed-twins.py --check   # fails if a twin is missing or outdated
+python3 scripts/gen-fixed-twins.py --report  # lists modules that have no corrected variant yet
+```
+
+Images that share a family include (`recipes-images/iotbench-<family>.inc`) have no
+literal `IOTBENCH_VULN_INSTALL`. Such an include supports twins when it defines
+`IOTBENCH_TWIN ?= "0"` and builds the package name from
+`IOTBENCH_TWIN_SUFFIX`, as `iotbench-permit-empty-passwords.inc` does. The
+generator then appends `IOTBENCH_TWIN = "1"` to the image recipe. Any guard in
+the include that expects the vulnerable state must accept the corrected one.
+`gen-fixed-twins.py --report` lists the families that do not support twins yet.
+
+In a twin, `IOTBENCH_CWE` is `none` and `IOTBENCH_CORRECTS_CWE` keeps the CWE of the
+original image.
+
+The twin recipe is the image recipe of the original with
+`IOTBENCH_VULN_INSTALL = "<module>-fixed"`. It is built only on request.
+
+```bash
+./scripts/build-all.sh --fixed                 # vulnerable images and their twins
+./scripts/build-all.sh --only-fixed --all      # only the twins, every machine
+FIRMWARE=router-cwe476-null-pointer-dereference-fixed docker compose up --build yocto
+```
+
+**Patterns used by the existing corrected variants**
+
+Every one of the 716 vulnerable images has a twin. The same few patterns cover
+all the families, so follow the closest one for a new weakness.
+
+- *Hard-coded or leaked secret* (password leak, embedded authentication). The file
+  keeps its key and format. The value becomes a runtime placeholder
+  (`${RUNTIME_SECRET}`, or a per-variant reference token) and the code reads the
+  secret from `IOTBENCH_RUNTIME_SECRET`. The scanner finds nothing and the manifest
+  lists no finding.
+- *Defect in one line of source* (native path, symlink, SQL, command, XSS and the
+  like). Change that line and nothing else: `O_NOFOLLOW`, an end-of-string check,
+  resolving beneath the allowed directory, a bound parameter, output encoding.
+  Update the test so that the exploit input is refused and ordinary input still works.
+- *Family that already ships a safe control* (REST, cron wildcard). Build or install
+  the safe control as the default one.
+- *Insecure service* (Telnet). Do not install the service and lock its account.
+
+In every twin the test that proves the weakness is replaced by a test that proves it
+is gone, for example `test_weakness_removed` in the Apache suite. Tests in `scripts/`
+that count recipes with a glob must ignore `*-fixed`, and the mocked BitBake `d` in
+them needs `IOTBENCH_TWIN_SUFFIX` set to the empty string.
+
+**Checklist for a new weakness**
+
+- [ ] `recipes-vulns/<module>/<module>-fixed_1.0.bb` and `files-fixed/`.
+- [ ] Negative `ground-truth.json` and a payload that no longer triggers.
+- [ ] `python3 scripts/gen-fixed-twins.py` run and the generated recipes committed.
+- [ ] The twin boots in QEMU, its normal behavior is unchanged, and the payload
+      of the original fails without a crash.
+
 ## Adding a new device type
 
 Create `recipes-devices/<device>/`, using `router` as the template:
@@ -284,10 +398,18 @@ FIRMWARE=<device>-cwe<NNN>-<slug> docker compose up --build yocto   # -> deploy-
 # Boot it (writable rootfs via -snapshot by default)
 FIRMWARE=<device>-cwe<NNN>-<slug> ./scripts/run-qemu.sh             # dashboard on http://127.0.0.1:8080
 
-# Build every firmware in the catalog, optionally across architectures
+# Build the default firmware set, optionally across architectures
 ./scripts/build-all.sh
 MACHINES="qemuarm64 qemuarm qemux86-64 qemux86 qemumips" ./scripts/build-all.sh
+
+# Build every firmware, opt-in fixtures included, on every architecture
+./scripts/build-all.sh --all
 ```
+
+`--fixed` adds the corrected twins to the run and `--only-fixed` builds only them.
+
+A firmware that needs an opt-in fixture flag is skipped by the default run
+unless that flag is exported. With `--all` it is built with only its own flag.
 
 The architecture is a build-time selector (`YOCTO_MACHINE`), not a separate
 recipe; keep device and vulnerability recipes architecture-agnostic (no
@@ -308,3 +430,8 @@ decompress the exported `.ext4.zst` and read it with `debugfs` (no root mount).
 - [ ] `bitbake -p` clean; `FIRMWARE=<id> docker compose up yocto` succeeds.
 - [ ] Booted in QEMU; the vulnerability is reachable and behaves as intended.
 - [ ] English strings only; external sources pinned; one CWE per firmware.
+- [ ] A corrected twin exists (`scripts/gen-fixed-twins.py --report` lists the
+      modules that have none).
+- [ ] A new opt-in `IOTBENCH_ENABLE_*_FIXTURE` flag is added to `fixture_flag_for` and
+      `KNOWN_FLAGS` in `scripts/build-all.sh` and to `container-build-and-export.sh`.
+      `python3 scripts/test-build-all.py` fails on a flag the script does not know.

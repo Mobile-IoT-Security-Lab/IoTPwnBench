@@ -1,0 +1,47 @@
+#!/bin/sh
+# Device-specific MQTT maintenance service, corrected variant of CWE-78.
+# The value is validated and never reaches a shell.
+set -u
+
+CLASS=device
+[ -f /etc/iotbench/device.conf ] && . /etc/iotbench/device.conf
+CLASS="${DEVICE_CLASS:-device}"
+
+case "$CLASS" in
+    smartplug)     ACTION=relay-schedule; LABEL=relay-schedule ;;
+    thermostat)    ACTION=hvac-profile;   LABEL=hvac-profile ;;
+    smartbulb)     ACTION=lighting-scene; LABEL=lighting-scene ;;
+    smarthub)      ACTION=pairing-backup; LABEL=pairing-backup ;;
+    envsensor)     ACTION=calibration;    LABEL=sensor-calibration ;;
+    smartspeaker)  ACTION=media-source;   LABEL=media-source ;;
+    healthmonitor) ACTION=export-target;  LABEL=health-export ;;
+    doorlock)      ACTION=firmware-url;   LABEL=lock-firmware ;;
+    *)             ACTION=maintenance;    LABEL=maintenance ;;
+esac
+
+REQUEST_TOPIC="iotbench/${CLASS}/maintenance/${ACTION}"
+RESULT_TOPIC="iotbench/${CLASS}/maintenance-result"
+
+while :; do
+    line="$(mosquitto_sub -h 127.0.0.1 -p 1883 -C 1 -v \
+        -t "$REQUEST_TOPIC" 2>/dev/null)" || {
+        sleep 1
+        continue
+    }
+    payload=${line#* }
+
+    # A value is made of letters, digits, spaces, dots, hyphens, underscores, colons and slashes.
+    case "$payload" in
+        *[!A-Za-z0-9._:/\ -]*)
+            output="rejected: invalid value"
+            rc=2
+            ;;
+        *)
+            output="$(printf '%s: %s' "$LABEL" "$payload")"
+            rc=0
+            ;;
+    esac
+    mosquitto_pub -h 127.0.0.1 -p 1883 -t "$RESULT_TOPIC" \
+        -m "exit=${rc}
+${output}" 2>/dev/null || true
+done

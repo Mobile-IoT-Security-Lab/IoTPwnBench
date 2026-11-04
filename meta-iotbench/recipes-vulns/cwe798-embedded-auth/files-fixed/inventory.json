@@ -1,0 +1,50 @@
+{
+  "c-source": {
+    "username": "fixture798_c_source",
+    "password": "RUNTIME_PROVISIONED_C_SOURCE",
+    "file": "credential.c",
+    "representation": "C string constants in ELF .rodata"
+  },
+  "shell": {
+    "username": "fixture798_shell",
+    "password": "RUNTIME_PROVISIONED_SHELL",
+    "file": "credentials.sh",
+    "representation": "single quoted shell assignments (read as data)"
+  },
+  "ini": {
+    "username": "fixture798_ini",
+    "password": "RUNTIME_PROVISIONED_INI",
+    "file": "auth.ini",
+    "representation": "INI separate fields"
+  },
+  "json": {
+    "username": "fixture798_json",
+    "password": "RUNTIME_PROVISIONED_JSON",
+    "file": "auth.json",
+    "representation": "JSON separate fields"
+  },
+  "xml": {
+    "username": "fixture798_xml",
+    "password": "RUNTIME_PROVISIONED_XML",
+    "file": "auth.xml",
+    "representation": "XML child elements"
+  },
+  "yaml": {
+    "username": "fixture798_yaml",
+    "password": "RUNTIME_PROVISIONED_YAML",
+    "file": "auth.yaml",
+    "representation": "YAML flat mapping"
+  },
+  "connection-string": {
+    "username": "fixture798_connection_string",
+    "password": "RUNTIME_PROVISIONED_CONNECTION_STRING",
+    "file": "connection.conf",
+    "representation": "synthetic connection string"
+  },
+  "base64": {
+    "username": "fixture798_base64",
+    "password": "RUNTIME_PROVISIONED_BASE64",
+    "file": "encoded.json",
+    "representation": "Base64 of username:password"
+  }
+}

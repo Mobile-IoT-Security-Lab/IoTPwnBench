@@ -1,0 +1,3 @@
+# Synthetic local authentication diagnostic snapshot
+level=DEBUG
+password = ${RUNTIME_SECRET}

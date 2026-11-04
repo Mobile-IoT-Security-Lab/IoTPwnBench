@@ -6,11 +6,16 @@ IOTBENCH_DEVICE_INSTALL = ""
 IMAGE_INSTALL = "packagegroup-core-boot ${IOTBENCH_VULN_INSTALL}"
 
 python iotbench_native_buffer_guard() {
+    # A corrected twin installs the -fixed package, with IOTBENCH_CWE reset to
+    # 'none' and the original CWE kept in IOTBENCH_CORRECTS_CWE.
     expected = 'cwe787-native-buffer-overflow'
+    twin = (d.getVar('IOTBENCH_VULN_INSTALL') or '').endswith('-fixed')
+    if twin:
+        expected = expected + '-fixed'
     if (d.getVar('IOTBENCH_BUILD_MODE') != 'fixture' or
             d.getVar('IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE') != '1'):
         bb.fatal('Native buffer fixtures require explicit opt-in and fixture mode')
-    if (d.getVar('IOTBENCH_CWE') != 'CWE-787' or
+    if (d.getVar('IOTBENCH_CWE') != ('none' if twin else 'CWE-787') or
             d.getVar('IOTBENCH_VULN_INSTALL') != expected or
             set((d.getVar('IMAGE_INSTALL') or '').split()) != {'packagegroup-core-boot', expected}):
         bb.fatal('Native buffer fixtures require exactly one CWE-787 package and no device daemons')
@@ -37,6 +42,7 @@ python iotbench_native_buffer_metadata() {
     manifest = pathlib.Path(d.getVar('IMAGE_MANIFEST'))
     if manifest.exists():
         packages = [line.split()[0] for line in manifest.read_text().splitlines() if line.split()]
-        if [p for p in packages if p.startswith('cwe')] != ['cwe787-native-buffer-overflow']:
+        expected = d.getVar('IOTBENCH_VULN_INSTALL')
+        if [p for p in packages if p.startswith('cwe')] != [expected]:
             bb.fatal('Unexpected vulnerability packages in native buffer fixture image')
 }

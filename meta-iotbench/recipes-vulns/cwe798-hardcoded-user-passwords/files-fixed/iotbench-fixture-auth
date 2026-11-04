@@ -1,0 +1,32 @@
+#!/bin/sh
+# Local synthetic application authentication, corrected variant of CWE-798.
+# The account database is empty until a unique credential is enrolled on the device.
+# This account grants only a harmless marker, never a shell or system access.
+printf '%s\n' 'CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED'
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' 'Usage: iotbench-fixture-auth <synthetic-account>; password on stdin' >&2
+    exit 2
+fi
+
+fixture_account=''
+fixture_password=''
+extra=''
+if ! IFS=: read -r fixture_account fixture_password extra < '@SYSCONFDIR@/iotbench/hardcoded-user-passwords/accounts.conf'; then
+    printf '%s\n' 'FIXTURE_ACCOUNT_UNAVAILABLE' >&2
+    exit 2
+fi
+if [ -z "$fixture_account" ] || [ -z "$fixture_password" ] || [ -n "$extra" ]; then
+    printf '%s\n' 'FIXTURE_ACCOUNT_UNAVAILABLE' >&2
+    exit 2
+fi
+
+supplied_password=''
+if ! IFS= read -r supplied_password; then
+    printf '%s\n' 'FIXTURE_AUTH_REJECTED'
+    exit 1
+fi
+if [ "$1" != "$fixture_account" ] || [ "$supplied_password" != "$fixture_password" ]; then
+    printf '%s\n' 'FIXTURE_AUTH_REJECTED'
+    exit 1
+fi
+printf '%s\n' 'HARDCODED_USER_PASSWORD_ACCEPTED' "AUTHENTICATED_AS=$fixture_account" 'FIXTURE_ONLY=BENIGN_LOCAL_AUTHENTICATION'

@@ -1,0 +1,38 @@
+{
+  "fixture": "cwe276-bad-write-rights-fixed",
+  "primary_cwe": "CWE-276",
+  "related_review_categories": [
+    "CWE-434",
+    "CWE-287"
+  ],
+  "user": "ftpfixture",
+  "intended_operations": [
+    "LIST",
+    "NLST",
+    "RETR"
+  ],
+  "prohibited_operations": [
+    "STOR"
+  ],
+  "directories": {
+    "bad": {
+      "intended_mode": "0755",
+      "fixture_mode": "0755",
+      "owner": "root",
+      "group": "ftpfixture"
+    },
+    "control": {
+      "intended_mode": "0755",
+      "fixture_mode": "0755",
+      "owner": "root",
+      "group": "ftpfixture"
+    }
+  },
+  "export_files": [
+    "readme.txt",
+    "device.conf",
+    "peripherals.conf",
+    "settings.json"
+  ],
+  "corrects": "cwe276-bad-write-rights"
+}

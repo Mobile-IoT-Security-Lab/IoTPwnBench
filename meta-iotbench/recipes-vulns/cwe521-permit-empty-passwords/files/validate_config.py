@@ -46,13 +46,13 @@ def validate_config(path, expected='yes'):
     return actual['permitemptypasswords'] == 'yes'
 
 
-def validate_rootfs(rootfs):
+def validate_rootfs(rootfs, expected='yes'):
     """Check a generated, extracted rootfs without executing any guest code."""
     root = Path(rootfs)
     config = root / 'etc/ssh/sshd_config'
     check(config.is_file() and not config.is_symlink(), 'Missing regular sshd_config')
     check(config.stat().st_mode & 0o022 == 0, 'sshd_config is writable by group/others')
-    check(validate_config(config), 'Missing vulnerable policy')
+    check(validate_config(config, expected) == (expected == 'yes'), 'Unexpected SSH policy')
     panel = root / 'usr/share/router-dashboard/modules/ssh-empty-password-policy/module.php'
     check(panel.is_file() and not panel.is_symlink(), 'Missing regular SSH policy dashboard module')
     check(panel.stat().st_mode & 0o022 == 0, 'SSH policy module is writable by group/others')

@@ -14,6 +14,9 @@ import tempfile
 import textwrap
 import unittest
 
+# These tests parse tool output as text, so run the tools in the neutral locale.
+os.environ["LC_ALL"] = "C"
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / 'meta-iotbench'
 RECIPE = LAYER / 'recipes-vulns/cwe061-native-symlink-following'
@@ -47,7 +50,7 @@ class Data:
     def __init__(self, mode='fixture', enable='1', machine='qemuarm64'):
         self.values = {'IOTBENCH_BUILD_MODE': mode, 'IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE': enable,
                        'MACHINE': machine, 'THISDIR': str(RECIPE), 'IOTBENCH_SYMLINK_LAYER': str(LAYER),
-                       'IOTBENCH_VULN_INSTALL': PACKAGE, 'IMAGE_INSTALL': 'packagegroup-core-boot ' + PACKAGE}
+                       'IOTBENCH_VULN_INSTALL': PACKAGE, 'IOTBENCH_TWIN_SUFFIX': '', 'IOTBENCH_TWIN': '0', 'IMAGE_INSTALL': 'packagegroup-core-boot ' + PACKAGE}
 
     def getVar(self, key):
         return self.values.get(key)

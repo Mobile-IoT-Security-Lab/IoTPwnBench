@@ -1,6 +1,9 @@
 # One wildcard argument injection scenario; the related CWEs share this flow.
 IOTBENCH_CWE = "CWE-88 CWE-78 CWE-269"
-IOTBENCH_VULN_INSTALL = "cwe088-cronjob-wildcard-injection"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe088-cronjob-wildcard-injection${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE ?= "0"
 

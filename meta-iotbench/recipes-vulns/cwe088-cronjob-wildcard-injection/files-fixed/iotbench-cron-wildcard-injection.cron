@@ -1,0 +1,4 @@
+# SYNTHETIC TEST FIXTURE, CORRECTED TWIN
+# CrOniE invokes a shell that expands the wildcard in the controlled inbox as root.
+# Operands are separated from options with --, so no file name acts as an option.
+* * * * * root cd /usr/share/iotbench/cronjob-wildcard-injection/inbox && /usr/share/iotbench/cronjob-wildcard-injection/bin/fixture-maintenance --fixture-test -- * >> /usr/share/iotbench/cronjob-wildcard-injection/logs/cron-secure.jsonl 2>&1

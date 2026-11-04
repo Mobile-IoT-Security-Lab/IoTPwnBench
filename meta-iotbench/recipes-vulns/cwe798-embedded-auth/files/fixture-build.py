@@ -22,16 +22,16 @@ def stage(output, mode, enabled, machine, variant, native_binary=None):
     if LIB['read_pair'](source, variant) != (item['username'], item['password']):
         raise ValueError('Credential source/inventory drift')
     binary = None
-    if variant == 'native':
+    if variant == 'c-source':
         if native_binary is None:
-            raise ValueError('Native fixture requires the compiled authentication library')
+            raise ValueError('C source fixture requires the compiled authentication library')
         binary = Path(native_binary).read_bytes()
         LIB['validate_elf'](binary, machine)
         if any(
                 value.encode() + b'\0' not in binary for value in (item['username'], item['password'])):
             raise ValueError('Compiled ELF does not contain the intended pair')
     elif native_binary is not None:
-        raise ValueError('Native library cannot be mixed into data fixtures')
+        raise ValueError('Compiled library cannot be mixed into data fixtures')
     root = output / 'usr/share/iotbench/embedded-auth' / variant
     root.mkdir(parents=True)
     shutil.copyfile(source, root / source.name)

@@ -1,0 +1,24 @@
+{
+  "label": "Vulnerable Java JARs — SQL Injection (corrected variant)",
+  "cwe": "CWE-89",
+  "warning": "CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED",
+  "jar": "@DATADIR@/iotbench/java-sql-injection/fixture-db-query.jar",
+  "main_class": "org.iotbench.fixture.FixtureDbQuery",
+  "source": "FixtureDbQuery.java",
+  "database": "@DATADIR@/iotbench/java-sql-injection/fixture.db",
+  "dependency": "@DATADIR@/java/iotbench-sqlite-jdbc.jar",
+  "native_driver": "@LIBDIR@/libsqlitejdbc.so",
+  "source_expression": "CLI args[0] or HTTP POST /lookup body -> input -> FixtureDbQuery.lookup(input)",
+  "read_only": "URI mode=ro&immutable=1; JDBC open_mode=1; connection.isReadOnly() enforced before query execution",
+  "sink": "stmt.executeQuery(query)",
+  "normal_input": "public",
+  "normal_output": [
+    "public|SYNTHETIC_PUBLIC_FIXTURE_DATA"
+  ],
+  "scope": "Read-only fixed synthetic database; unprivileged Java service bound to guest loopback; shared dashboard retains CSRF and Lighttpd sandbox; no shell execution",
+  "web_entry": "Dashboard Configuration Lookup -> java_configuration_lookup API -> fixed loopback POST http://127.0.0.1:18089/lookup -> Java JDBC lookup",
+  "normal_internal_output": [],
+  "corrects": "cwe089-java-sql-injection",
+  "expected_signal": "none",
+  "corrected_behavior": "The input is bound as a SQL value, so an injection input matches no record."
+}

@@ -1,0 +1,4 @@
+IOTBENCH NATIVE SUDO MAINTENANCE LAB (CORRECTED TWIN)
+The locked fixtureenv account may run only fixed du and id commands as root.
+The sudo policy resets the environment and preserves nothing, so POSIXLY_CORRECT
+does not change the units of the du report. No weakness is injected.

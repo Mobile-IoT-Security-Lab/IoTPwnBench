@@ -1,5 +1,8 @@
 IOTBENCH_CWE = "CWE-798"
-IOTBENCH_VULN_INSTALL = "cwe798-password-leak-${IOTBENCH_PASSWORD_LEAK_VARIANT}"
+# A corrected twin sets IOTBENCH_TWIN to 1. It installs the corrected variant of the module.
+IOTBENCH_TWIN ?= "0"
+IOTBENCH_TWIN_SUFFIX = "${@'-fixed' if d.getVar('IOTBENCH_TWIN') == '1' else ''}"
+IOTBENCH_VULN_INSTALL = "cwe798-password-leak-${IOTBENCH_PASSWORD_LEAK_VARIANT}${IOTBENCH_TWIN_SUFFIX}"
 IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE ?= "0"
 IOTBENCH_PASSWORD_LEAK_LAYER := "${THISDIR}/.."
@@ -14,7 +17,7 @@ python iotbench_password_leak_guard() {
             d.getVar('IOTBENCH_PASSWORD_LEAK_VARIANT'))
     except ValueError as error:
         bb.fatal(str(error))
-    expected = 'cwe798-password-leak-' + d.getVar('IOTBENCH_PASSWORD_LEAK_VARIANT')
+    expected = 'cwe798-password-leak-' + d.getVar('IOTBENCH_PASSWORD_LEAK_VARIANT') + d.getVar('IOTBENCH_TWIN_SUFFIX')
     if d.getVar('IOTBENCH_VULN_INSTALL') != expected:
         bb.fatal('Password Leak images must contain exactly one scenario package')
     extras = (d.getVar('IMAGE_INSTALL') or '').split()

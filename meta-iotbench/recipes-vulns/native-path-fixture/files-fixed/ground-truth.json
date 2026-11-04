@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "variants": {
+    "022": {
+      "intentional_vulnerabilities": 0,
+      "primary_cwe": "CWE-22",
+      "binary": "fixture-path-cwe022",
+      "source": "fixture-path.c",
+      "flow": "request_path -> retrieve -> confined_open(allowedfd, file) -> openat2 RESOLVE_BENEATH -> read",
+      "intended_boundary": "/fixture/fs/allowed",
+      "outer_boundary": "/fixture/fs",
+      "request": "../sentinel.txt",
+      "corrected": true,
+      "expected_response": "ERR DENIED"
+    },
+    "020": {
+      "intentional_vulnerabilities": 0,
+      "primary_cwe": "CWE-20",
+      "binary": "fixture-path-cwe020",
+      "source": "fixture-path.c",
+      "flow": "request_path -> retrieve -> filename_policy -> strcmp(.cfg) -> confined_open(allowedfd, file) -> openat2 -> read",
+      "filename_contract": "[a-z][a-z0-9_-]{0,31}\\.cfg (full match)",
+      "boundary": "/fixture/fs/allowed",
+      "request": "private.cfg.bak",
+      "corrected": true,
+      "expected_response": "ERR DENIED"
+    }
+  }
+}

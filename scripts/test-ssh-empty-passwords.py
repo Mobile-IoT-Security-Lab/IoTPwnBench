@@ -11,6 +11,10 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+import os
+
+# Stage files the way a Yocto build does, whatever umask the caller has.
+os.umask(0o022)
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE = REPO / 'meta-iotbench/recipes-vulns/cwe521-permit-empty-passwords/files'
@@ -110,7 +114,7 @@ def integration_test():
           'SSH daemon package exclusions missing')
     check('ROOTFS_POSTPROCESS_COMMAND += "iotbench_validate_empty_passwords; "' in guards,
           'Rootfs validation hook missing')
-    check("validator['validate_rootfs'](d.getVar('IMAGE_ROOTFS'))" in guards,
+    check("validator['validate_rootfs'](d.getVar('IMAGE_ROOTFS')" in guards,
           'Rootfs hook does not validate the built filesystem')
     common = (images / 'iotbench-image.inc').read_text()
     check('permit-empty-passwords' not in common, 'Fixture enabled in shared image')

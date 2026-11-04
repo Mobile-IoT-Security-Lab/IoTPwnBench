@@ -6,11 +6,14 @@ set -eo pipefail
 
 FIRMWARE="${FIRMWARE:-router-cwe078-os-command-injection}"
 IMAGE="iotbench-${FIRMWARE}"
+# A corrected twin (id ending in -fixed) needs the same fixture family as the
+# vulnerable image it mirrors, so the family is chosen from the id without it.
+FIRMWARE_KIND="${FIRMWARE%-fixed}"
 
 # Selecting a named Marco fixture is sufficient for the common Compose command.
 # Keep recipe-level guards and explicit disable/production/mixing checks intact.
 fixture_flag=""
-case "$FIRMWARE" in
+case "$FIRMWARE_KIND" in
     *-cwe276-bad-write-rights) fixture_flag=IOTBENCH_ENABLE_FTP_WRITE_FIXTURE ;;
     *-cwe798-unencrypted-traffic) fixture_flag=IOTBENCH_ENABLE_TELNET_FIXTURE ;;
     *-cwe798-sudo-environment) fixture_flag=IOTBENCH_ENABLE_SUDO_ENV_FIXTURE ;;
@@ -45,7 +48,7 @@ source /opt/yocto/yocto-env.sh
 # These service fixtures also need a global BitBake configuration: environment
 # variables alone are not visible to recipe parse-time guards.
 service_flag=""
-case "$FIRMWARE" in
+case "$FIRMWARE_KIND" in
     *-cwe276-bad-write-rights) service_flag=IOTBENCH_ENABLE_FTP_WRITE_FIXTURE ;;
     *-cwe798-unencrypted-traffic) service_flag=IOTBENCH_ENABLE_TELNET_FIXTURE ;;
     *-cwe798-sudo-environment) service_flag=IOTBENCH_ENABLE_SUDO_ENV_FIXTURE ;;
@@ -70,9 +73,9 @@ DISTRO_FEATURES:append = " pam systemd"
 FIXTURE_CONF
     fi
     bitbake -r "$fixture_conf" "${IMAGE}"
-elif [[ "${IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE:-0}" == 1 || "$FIRMWARE" == *-cwe502-java-deserialization ]]; then
+elif [[ "${IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE:-0}" == 1 || "$FIRMWARE_KIND" == *-cwe502-java-deserialization ]]; then
     [[ "${IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE:-0}" == 1 &&
-       "$FIRMWARE" == *-cwe502-java-deserialization &&
+       "$FIRMWARE_KIND" == *-cwe502-java-deserialization &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Java deserialization requires its own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -91,9 +94,9 @@ IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE:-0}" == 1 ||
-      "$FIRMWARE" == *-cwe078-java-os-command-injection || "$FIRMWARE" == *-cwe077-java-app-command-injection ]]; then
+      "$FIRMWARE_KIND" == *-cwe078-java-os-command-injection || "$FIRMWARE_KIND" == *-cwe077-java-app-command-injection ]]; then
     [[ "${IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE:-0}" == 1 &&
-       ( "$FIRMWARE" == *-cwe078-java-os-command-injection || "$FIRMWARE" == *-cwe077-java-app-command-injection ) &&
+       ( "$FIRMWARE_KIND" == *-cwe078-java-os-command-injection || "$FIRMWARE_KIND" == *-cwe077-java-app-command-injection ) &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Java command fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -111,9 +114,9 @@ IOTBENCH_BUILD_MODE = "fixture"
 IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
-elif [[ "${IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE:-0}" == 1 || "$FIRMWARE" == *-cwe061-native-symlink-following ]]; then
+elif [[ "${IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE:-0}" == 1 || "$FIRMWARE_KIND" == *-cwe061-native-symlink-following ]]; then
     [[ "${IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE:-0}" == 1 &&
-       "$FIRMWARE" == *-cwe061-native-symlink-following &&
+       "$FIRMWARE_KIND" == *-cwe061-native-symlink-following &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Native symlink fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -131,9 +134,9 @@ IOTBENCH_BUILD_MODE = "fixture"
 IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
-elif [[ "${IOTBENCH_ENABLE_CONNECTION_FIXTURE:-0}" == 1 || "$FIRMWARE" == *-cwe020-native-connection-string ]]; then
+elif [[ "${IOTBENCH_ENABLE_CONNECTION_FIXTURE:-0}" == 1 || "$FIRMWARE_KIND" == *-cwe020-native-connection-string ]]; then
     [[ "${IOTBENCH_ENABLE_CONNECTION_FIXTURE:-0}" == 1 &&
-       "$FIRMWARE" == *-cwe020-native-connection-string &&
+       "$FIRMWARE_KIND" == *-cwe020-native-connection-string &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Native connection fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -151,9 +154,9 @@ IOTBENCH_BUILD_MODE = "fixture"
 IOTBENCH_ENABLE_CONNECTION_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
-elif [[ "${IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE:-0}" == 1 || "$FIRMWARE" == *-cwe787-native-buffer-overflow ]]; then
+elif [[ "${IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE:-0}" == 1 || "$FIRMWARE_KIND" == *-cwe787-native-buffer-overflow ]]; then
     [[ "${IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE:-0}" == 1 &&
-       "$FIRMWARE" == *-cwe787-native-buffer-overflow &&
+       "$FIRMWARE_KIND" == *-cwe787-native-buffer-overflow &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Native buffer fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -177,9 +180,9 @@ FIXTURE_CONF
     esac
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE:-0}" == 1 ||
-      "$FIRMWARE" == *-cwe022-native-path-traversal || "$FIRMWARE" == *-cwe020-native-filename-validation ]]; then
+      "$FIRMWARE_KIND" == *-cwe022-native-path-traversal || "$FIRMWARE_KIND" == *-cwe020-native-filename-validation ]]; then
     [[ "${IOTBENCH_ENABLE_NATIVE_PATH_FIXTURE:-0}" == 1 &&
-       ( "$FIRMWARE" == *-cwe022-native-path-traversal || "$FIRMWARE" == *-cwe020-native-filename-validation ) &&
+       ( "$FIRMWARE_KIND" == *-cwe022-native-path-traversal || "$FIRMWARE_KIND" == *-cwe020-native-filename-validation ) &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Native path fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -199,7 +202,7 @@ FIXTURE_CONF
     case "${IOTBENCH_NATIVE_PATH_ASAN:-0}" in
         0) ;;
         1)
-            case "$FIRMWARE" in
+            case "$FIRMWARE_KIND" in
                 *-cwe022-native-path-traversal) path_package=cwe022-native-path-traversal ;;
                 *-cwe020-native-filename-validation) path_package=cwe020-native-filename-validation ;;
             esac
@@ -208,9 +211,9 @@ FIXTURE_CONF
         *) echo "IOTBENCH_NATIVE_PATH_ASAN must be 0 or 1" >&2; exit 1 ;;
     esac
     bitbake -r "$fixture_conf" "${IMAGE}"
-elif [[ "${IOTBENCH_ENABLE_APACHE_FIXTURE:-0}" == 1 || "$FIRMWARE" == *-cwe???-apache-web ]]; then
+elif [[ "${IOTBENCH_ENABLE_APACHE_FIXTURE:-0}" == 1 || "$FIRMWARE_KIND" == *-cwe???-apache-web ]]; then
     [[ "${IOTBENCH_ENABLE_APACHE_FIXTURE:-0}" == 1 &&
-       "$FIRMWARE" == *-cwe???-apache-web &&
+       "$FIRMWARE_KIND" == *-cwe???-apache-web &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture ]] || {
         echo "Apache fixtures require their own image, explicit opt-in and fixture mode" >&2
         exit 1
@@ -229,7 +232,7 @@ IOTBENCH_ENABLE_APACHE_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE:-0}" == 1 ]]; then
-    [[ "$FIRMWARE" == *-cwe798-embedded-auth-* &&
+    [[ "$FIRMWARE_KIND" == *-cwe798-embedded-auth-* &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture &&
        "${IOTBENCH_ENABLE_REST_FIXTURE:-0}" != 1 &&
        "${IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE:-0}" != 1 &&
@@ -248,7 +251,7 @@ IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_REST_FIXTURE:-0}" == 1 ]]; then
-    [[ "$FIRMWARE" == *-cwe022-rest-internal-files &&
+    [[ "$FIRMWARE_KIND" == *-cwe022-rest-internal-files &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture &&
        "${IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE:-0}" != 1 &&
        "${IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE:-0}" != 1 &&
@@ -266,7 +269,7 @@ IOTBENCH_ENABLE_REST_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE:-0}" == 1 ]]; then
-    [[ "$FIRMWARE" == *-cwe798-password-leak-* &&
+    [[ "$FIRMWARE_KIND" == *-cwe798-password-leak-* &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture &&
        "${IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE:-0}" != 1 &&
        "${IOTBENCH_ENABLE_SUDO_ENV_FIXTURE:-0}" != 1 &&
@@ -283,7 +286,7 @@ IOTBENCH_ENABLE_PASSWORD_LEAK_FIXTURE = "1"
 FIXTURE_CONF
     bitbake -r "$fixture_conf" "${IMAGE}"
 elif [[ "${IOTBENCH_ENABLE_CRON_WILDCARD_FIXTURE:-0}" == 1 ]]; then
-    [[ "$FIRMWARE" == *-cwe088-cronjob-wildcard-injection &&
+    [[ "$FIRMWARE_KIND" == *-cwe088-cronjob-wildcard-injection &&
        "${IOTBENCH_BUILD_MODE:-fixture}" == fixture &&
        "${IOTBENCH_ENABLE_SUDO_ENV_FIXTURE:-0}" != 1 &&
        "${IOTBENCH_ENABLE_TELNET_FIXTURE:-0}" != 1 &&

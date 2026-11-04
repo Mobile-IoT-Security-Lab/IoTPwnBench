@@ -1,0 +1,5 @@
+CORRECTED VARIANT OF A SYNTHETIC TEST FIXTURE, NO KNOWN WEAKNESS INJECTED
+
+Scenario: Bad SUDO Rights — Path Traversal (CWE-22).
+Only fake fixture files are involved. The reader is confined to this tree.
+The intended data/ directory boundary is deliberately NOT enforced.

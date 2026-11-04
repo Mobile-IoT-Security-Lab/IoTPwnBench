@@ -21,7 +21,11 @@ grep -F 'CWE-787' "$data/ground-truth.json" >/dev/null
 printf '%s\n' 'PASS device identity, ELF, primary CWE and ordinary permissions'
 
 run() {
-    timeout 15 setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper" "$@"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 15 setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper" "$@"
+    else
+        setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs "$helper" "$@"
+    fi
 }
 [ "$(printf '\000\000' | run)" = 'OK 0 0' ]
 [ "$(printf '\000\001A' | run)" = 'OK 1 65' ]

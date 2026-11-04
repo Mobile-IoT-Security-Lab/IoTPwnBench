@@ -49,7 +49,7 @@ def integration():
                          'require recipes-images/iotbench-unencrypted-traffic.inc'):
             check(expected in text, 'Incorrect image integration: ' + device)
     common = (recipes / 'iotbench-unencrypted-traffic.inc').read_text()
-    check('IOTBENCH_VULN_INSTALL = "' + SLUG + '"' in common, 'Wrong scenario package')
+    check('IOTBENCH_VULN_INSTALL = "' + SLUG + '${IOTBENCH_TWIN_SUFFIX}"' in common, 'Wrong scenario package')
     truth = json.loads((SOURCE / 'ground-truth.json').read_text())
     check(truth['demonstrated_cwes'] == ['CWE-319', 'CWE-798']
           and truth['account_privileged'] is False, 'Incorrect native-service ground truth')

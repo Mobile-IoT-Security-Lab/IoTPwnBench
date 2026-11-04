@@ -26,10 +26,10 @@ python __anonymous() {
 }
 
 do_compile() {
-    if [ '${IOTBENCH_EMBEDDED_AUTH_VARIANT}' = native ]; then
+    if [ '${IOTBENCH_EMBEDDED_AUTH_VARIANT}' = c-source ]; then
         # Keep the toolchain's CFLAGS/LDFLAGS and all normal security features.
         ${CC} ${CPPFLAGS} ${CFLAGS} -std=c11 -Wall -Wextra -Werror -fstack-protector-all -fPIC -shared \
-            -DIOTBENCH_EMBEDDED_AUTH_ENABLED=1 ${S}/fixtures/native/credential.c \
+            -DIOTBENCH_EMBEDDED_AUTH_ENABLED=1 ${S}/fixtures/c-source/credential.c \
             ${LDFLAGS} -Wl,-z,relro,-z,now,-z,noexecstack -o ${B}/credential.so
     fi
 }
@@ -37,10 +37,10 @@ do_compile() {
 do_install[vardeps] += "IOTBENCH_BUILD_MODE IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE MACHINE IOTBENCH_EMBEDDED_AUTH_VARIANT"
 do_install() {
     rm -rf ${B}/embedded-auth-stage
-    if [ '${IOTBENCH_EMBEDDED_AUTH_VARIANT}' = native ]; then
+    if [ '${IOTBENCH_EMBEDDED_AUTH_VARIANT}' = c-source ]; then
         ${PYTHON} ${S}/fixture-build.py --output ${B}/embedded-auth-stage \
             --mode '${IOTBENCH_BUILD_MODE}' --enable '${IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE}' \
-            --machine '${MACHINE}' --variant native --native-binary ${B}/credential.so
+            --machine '${MACHINE}' --variant c-source --native-binary ${B}/credential.so
     else
         ${PYTHON} ${S}/fixture-build.py --output ${B}/embedded-auth-stage \
             --mode '${IOTBENCH_BUILD_MODE}' --enable '${IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE}' \

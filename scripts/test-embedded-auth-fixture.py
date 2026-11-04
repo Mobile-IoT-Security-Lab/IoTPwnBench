@@ -15,6 +15,11 @@ import sys
 import tempfile
 import textwrap
 
+# These tests parse tool output as text, so run the tools in the neutral locale.
+os.environ["LC_ALL"] = "C"
+# Stage files the way a Yocto build does, whatever umask the caller has.
+os.umask(0o022)
+
 ROOT = Path(__file__).resolve().parents[1]
 LAYER = ROOT / 'meta-iotbench'
 SOURCE = LAYER / 'recipes-vulns/cwe798-embedded-auth/files'
@@ -36,12 +41,12 @@ def rejected(action):
     raise AssertionError('Invalid configuration/artifact accepted')
 
 
-def compile_native(work, enabled):
+def compile_c_source(work, enabled):
     binary = work / ('credential.so' if enabled else 'production.so')
     command = ['cc'] + FLAGS
     if enabled:
         command += ['-DIOTBENCH_EMBEDDED_AUTH_ENABLED=1']
-    subprocess.run(command + [str(SOURCE / 'fixtures/native/credential.c'), '-o', str(binary)],
+    subprocess.run(command + [str(SOURCE / 'fixtures/c-source/credential.c'), '-o', str(binary)],
                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
     return binary
 
@@ -52,11 +57,11 @@ def snapshot(path):
 
 
 def stages(work):
-    binary = compile_native(work, True)
-    production = compile_native(work, False)
+    binary = compile_c_source(work, True)
+    production = compile_c_source(work, False)
     again = work / 'compile-again'
     again.mkdir()
-    assert binary.read_bytes() == compile_native(again, True).read_bytes()
+    assert binary.read_bytes() == compile_c_source(again, True).read_bytes()
     production_lib = ctypes.CDLL(str(production))
     production_lib.fixture_auth.argtypes = (ctypes.c_char_p, ctypes.c_char_p)
     for item in INVENTORY.values():
@@ -74,14 +79,14 @@ def stages(work):
             LIB['validate_elf'](binary.read_bytes(), machine)
         except ValueError:
             output = work / 'wrong-target'
-            rejected(lambda: BUILD['stage'](output, 'fixture', '1', machine, 'native', binary))
+            rejected(lambda: BUILD['stage'](output, 'fixture', '1', machine, 'c-source', binary))
             assert not output.exists()
-    print('PASS compiled ELF extraction, native production stub, deterministic compile, RELRO/NOW/NX/stack protector')
+    print('PASS compiled ELF extraction, C source production stub, deterministic compile, RELRO/NOW/NX/stack protector')
 
     for variant in LIB['VARIANTS']:
         item = INVENTORY[variant]
         machine = 'qemuarm64'
-        if variant == 'native':
+        if variant == 'c-source':
             for candidate in LIB['MACHINES']:
                 try:
                     LIB['validate_elf'](binary.read_bytes(), candidate)
@@ -92,7 +97,7 @@ def stages(work):
             else:
                 raise AssertionError('Host compiler architecture must match a supported QEMU target')
         kwargs = dict(mode='fixture', enabled='1', machine=machine, variant=variant,
-                      native_binary=binary if variant == 'native' else None)
+                      native_binary=binary if variant == 'c-source' else None)
         rootfs = work / variant
         root = BUILD['stage'](rootfs, **kwargs)
         VERIFY(rootfs, variant)
@@ -112,13 +117,13 @@ def stages(work):
         second = work / (variant + '-again')
         BUILD['stage'](second, **kwargs)
         assert snapshot(rootfs) == snapshot(second)
-        if variant == 'native':
+        if variant == 'c-source':
             # Prove the compiled implementation authenticates without source.
             (root / item['file']).unlink()
             good = json.dumps(dict(username=item['username'], password=item['password'])).encode()+b'\n'
             with RUNTIME['service'](root, work) as endpoint:
                 assert RUNTIME['request'](endpoint, good) == b'OK\n'
-            shutil.copyfile(SOURCE / 'fixtures/native/credential.c', root / item['file'])
+            shutil.copyfile(SOURCE / 'fixtures/c-source/credential.c', root / item['file'])
         else:
             # Change the real artifact, keeping the request and all metadata fixed:
             # the old pair stops authenticating, the new artifact pair succeeds.
@@ -187,7 +192,10 @@ def integration(work):
     devices = sorted(p.parent.name for p in (LAYER / 'recipes-devices').glob('*/device-*.inc'))
     recipes = LAYER / 'recipes-images'
     expected = {'iotbench-'+d+'-cwe798-embedded-auth-'+v+'.bb' for d,v in itertools.product(devices, LIB['VARIANTS'])}
-    assert expected == {p.name for p in recipes.glob('iotbench-*-cwe798-embedded-auth-*.bb')}
+    assert expected == {p.name for p in recipes.glob('iotbench-*-cwe798-embedded-auth-*.bb')
+                        if not p.stem.endswith('-fixed')}
+    twins = {name[:-len('.bb')] + '-fixed.bb' for name in expected}
+    assert twins == {p.name for p in recipes.glob('iotbench-*-cwe798-embedded-auth-*-fixed.bb')}
     for device, variant in itertools.product(devices, LIB['VARIANTS']):
         text = (recipes / ('iotbench-'+device+'-cwe798-embedded-auth-'+variant+'.bb')).read_text()
         assert 'require recipes-devices/'+device+'/device-'+device+'.inc' in text
@@ -197,7 +205,7 @@ def integration(work):
         assert (SOURCE.parent / ('cwe798-embedded-auth-'+variant+'_1.0.bb')).read_text() == (
             'require cwe798-embedded-auth.inc\nIOTBENCH_EMBEDDED_AUTH_VARIANT = "'+variant+'"\n')
     for path in LAYER.rglob('*.bb'):
-        if path.name not in expected and not path.name.startswith('cwe798-embedded-auth-'):
+        if path.name not in expected | twins and not path.name.startswith('cwe798-embedded-auth-'):
             assert 'cwe798-embedded-auth' not in path.read_text()
 
     class Parse:
@@ -218,7 +226,7 @@ def integration(work):
             self.values = dict(IOTBENCH_BUILD_MODE=mode, IOTBENCH_ENABLE_EMBEDDED_AUTH_FIXTURE=enabled,
                                MACHINE=machine, IOTBENCH_EMBEDDED_AUTH_VARIANT=variant,
                                THISDIR=str(SOURCE.parent), IOTBENCH_EMBEDDED_AUTH_LAYER=str(LAYER),
-                               IOTBENCH_VULN_INSTALL=package, datadir='/usr/share',
+                               IOTBENCH_VULN_INSTALL=package, IOTBENCH_TWIN_SUFFIX='', IOTBENCH_TWIN='0', datadir='/usr/share',
                                IMAGE_INSTALL='packagegroup-core-boot '+package,
                                EXTRA_USERS_PARAMS="usermod -p '!' root;")
         def getVar(self, key):
