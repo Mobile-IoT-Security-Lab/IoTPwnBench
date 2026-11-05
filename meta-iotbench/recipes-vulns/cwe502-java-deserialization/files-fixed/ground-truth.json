@@ -9,8 +9,8 @@
   "unexpected_type": "org.iotbench.fixture.deserialization.FixtureMarker",
   "callback": "FixtureMarker.readObject -> static events++",
   "late_check": "FixtureDeserialize.process: instanceof FixtureData",
-  "observation": "FixtureHarness reads FixtureMarker.eventCount independently of the CLI response",
-  "comparison": "test harness merges explicit FixtureData/String allowlist with resource and existing JVM filters",
+  "observation": "FixtureDeserialize --fixture-test --show-events prints FixtureMarker.eventCount after the request",
+  "comparison": "the explicit FixtureData/String allowlist rejects the marker before its callback",
   "limits": {
     "bytes": 4096,
     "depth": 8,

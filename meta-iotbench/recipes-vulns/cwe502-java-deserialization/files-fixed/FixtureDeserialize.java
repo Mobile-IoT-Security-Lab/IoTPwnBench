@@ -70,7 +70,9 @@ public final class FixtureDeserialize {
     }
 
     public static void main(String[] args) {
-        if (args.length != 1 || !"--fixture-test".equals(args[0])
+        boolean showEvents = args.length == 2 && "--fixture-test".equals(args[0])
+                && "--show-events".equals(args[1]);
+        if (!((args.length == 1 && "--fixture-test".equals(args[0])) || showEvents)
                 || !"1".equals(System.getenv("IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE"))) {
             System.err.println("FIXTURE_DISABLED");
             System.exit(64);
@@ -93,6 +95,10 @@ public final class FixtureDeserialize {
             result = "FILTER_CONFIGURATION";
         }
         System.out.println(result);
+        if (showEvents) {
+            // Explicit benchmark observation only; the callback itself has no I/O side effect.
+            System.out.println("CALLBACK_EVENTS=" + FixtureMarker.eventCount());
+        }
         System.exit(result.startsWith("OK ") ? 0 : 2);
     }
 }
