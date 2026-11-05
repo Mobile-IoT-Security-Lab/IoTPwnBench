@@ -106,6 +106,38 @@ static void handle_request(int client, int rootfd)
         (void)send_all(client, body, size);
 }
 
+/* The existing isolation launcher creates one fixed state in its disposable
+ * tmpfs, then passes its name here. This one-shot terminal entry invokes the
+ * same retrieve() sink as the Unix socket service, without a Python client. */
+static int manual_state(int rootfd, const char *mode)
+{
+    struct stat entry;
+    if (fstatat(rootfd, "public.cfg", &entry, AT_SYMLINK_NOFOLLOW)) return 0;
+    if (!strcmp(mode, "ordinary")) return S_ISREG(entry.st_mode);
+    if (!strcmp(mode, "symlink") && S_ISLNK(entry.st_mode)) {
+        char target[sizeof("../sentinel.txt")];
+        ssize_t n = readlinkat(rootfd, "public.cfg", target, sizeof(target));
+        return n == (ssize_t)sizeof(target) - 1 &&
+               !memcmp(target, "../sentinel.txt", sizeof(target) - 1);
+    }
+    return 0;
+}
+
+static int handle_manual_request(int rootfd, const char *mode)
+{
+    char body[FILE_LIMIT], header[40];
+    size_t size = 0;
+    const char *error = "ERR INVALID\n";
+    if (manual_state(rootfd, mode)) error = retrieve(rootfd, body, &size);
+    if (error) return fputs(error, stdout) == EOF ? 77 : 0;
+    int n = snprintf(header, sizeof(header), "OK %zu\n", size);
+    if (n <= 0 || (size_t)n >= sizeof(header) ||
+        fwrite(header, 1, (size_t)n, stdout) != (size_t)n ||
+        fwrite(body, 1, size, stdout) != size || fflush(stdout) == EOF)
+        return 77;
+    return 0;
+}
+
 static int isolated(void)
 {
     struct statfs fs;
@@ -129,13 +161,20 @@ static int isolated(void)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2 || strcmp(argv[1], "--isolated-fixture")) return 77;
+    int manual = argc == 4 && !strcmp(argv[1], "--isolated-fixture") &&
+                 !strcmp(argv[2], "--manual-request");
+    if (!((argc == 2 && !strcmp(argv[1], "--isolated-fixture")) || manual)) return 77;
     if (!isolated()) { fputs("Requires the isolated test runner\n", stderr); return 77; }
     /* All ancestors are created once by the trusted isolated harness. Pin the
      * allowed directory before accepting requests; no caller-supplied paths. */
     int rootfd = open("/tmp/symlink-fixture/allowed",
                       O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (rootfd < 0) { perror("fixture directory"); return 77; }
+    if (manual) {
+        int status = handle_manual_request(rootfd, argv[3]);
+        close(rootfd);
+        return status;
+    }
     struct sockaddr_un address = {.sun_family = AF_UNIX};
     memcpy(address.sun_path, "/run/symlink.sock", sizeof("/run/symlink.sock"));
     umask(0077);

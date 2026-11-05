@@ -32,6 +32,56 @@ static void tmpfs(const char *path, const char *options)
     if (mount("tmpfs", path, "tmpfs", MS_NOSUID | MS_NODEV, options)) die(path);
 }
 
+/* The manual CWE-61 entry needs two ordinary fixture files in its writable
+ * tmpfs. Copy them only after the runner has detached the guest root; this
+ * helper never accepts a caller-selected source or destination path. */
+static void copy_manual_file(const char *source, const char *target)
+{
+    int input = open(source, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    int output = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    struct stat st;
+    if (input < 0 || output < 0 || fstat(input, &st) || !S_ISREG(st.st_mode))
+        die("manual fixture file");
+    char buffer[16384];
+    for (;;) {
+        ssize_t n = read(input, buffer, sizeof(buffer));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) die("manual fixture read");
+        if (!n) break;
+        ssize_t used = 0;
+        while (used < n) {
+            ssize_t written = write(output, buffer + used, (size_t)(n - used));
+            if (written < 0 && errno == EINTR) continue;
+            if (written <= 0) die("manual fixture write");
+            used += written;
+        }
+    }
+    if (close(input) || close(output)) die("manual fixture close");
+}
+
+static int prepare_manual_symlink(const char *mode)
+{
+    if (strcmp(mode, "ordinary") && strcmp(mode, "symlink")) {
+        fputs("Native symlink manual mode requires ordinary or symlink\n", stderr);
+        return -1;
+    }
+    if (mkdir("/tmp/symlink-fixture", 0700) ||
+        mkdir("/tmp/symlink-fixture/allowed", 0700))
+        die("manual symlink directories");
+    copy_manual_file("/fixture/fs/allowed/public.cfg",
+                     "/tmp/symlink-fixture/allowed/public.cfg");
+    copy_manual_file("/fixture/fs/sentinel.txt", "/tmp/symlink-fixture/sentinel.txt");
+    if (!strcmp(mode, "symlink")) {
+        if (unlink("/tmp/symlink-fixture/allowed/public.cfg") ||
+            symlink("../sentinel.txt", "/tmp/symlink-fixture/allowed/public.cfg"))
+            die("manual symlink entry");
+        fputs("ENTRY symlink public.cfg -> ../sentinel.txt\n", stdout);
+    } else {
+        fputs("ENTRY ordinary public.cfg\n", stdout);
+    }
+    return fflush(stdout) == EOF ? -1 : 0;
+}
+
 /* No symlinks or special files from the staging tree enter the new root. */
 static void copy_tree(int source, int target)
 {
@@ -148,6 +198,7 @@ int main(int argc, char **argv)
     for (int fd = 3; fd < maxfd; ++fd) close(fd);
     if (manual) {
         const char *binary = NULL;
+        int symlink = 0;
         if (access("/fixture/bin/fixture-path-cwe022", X_OK) == 0)
             binary = "/fixture/bin/fixture-path-cwe022";
         if (access("/fixture/bin/fixture-path-cwe020", X_OK) == 0) {
@@ -157,9 +208,22 @@ int main(int argc, char **argv)
             }
             binary = "/fixture/bin/fixture-path-cwe020";
         }
+        if (access("/fixture/bin/fixture-symlink-cwe061", X_OK) == 0) {
+            if (binary) {
+                fputs("Fixture has more than one native fixture variant\n", stderr);
+                return 77;
+            }
+            binary = "/fixture/bin/fixture-symlink-cwe061";
+            symlink = 1;
+        }
         if (!binary) {
-            fputs("Fixture has no native path variant\n", stderr);
+            fputs("Fixture has no native path or symlink variant\n", stderr);
             return 77;
+        }
+        if (symlink) {
+            if (prepare_manual_symlink(argv[4])) return 77;
+            execl(binary, binary, "--isolated-fixture", "--manual-request", argv[4], (char *)NULL);
+            die("exec manual symlink request");
         }
         execl(binary, binary, "--isolated-fixture", "--manual-request", argv[4], (char *)NULL);
         die("exec manual request");

@@ -10,6 +10,9 @@ IOTBENCH_BUILD_MODE ?= "production"
 IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE ?= "0"
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[asan] = ",,gcc-sanitizers,libasan"
+# The fixture compiles directly in do_compile; its shipped Makefile is an
+# offline reference and deliberately has no clean target for do_configure.
+do_configure[noexec] = "1"
 CFLAGS:append = " -fstack-protector-strong -fPIE"
 LDFLAGS:append = " -pie -Wl,-z,relro,-z,now,-z,noexecstack"
 
@@ -25,14 +28,17 @@ INHIBIT_PACKAGE_STRIP = "1"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 do_compile[vardeps] += "IOTBENCH_BUILD_MODE IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE PACKAGECONFIG"
 do_compile() {
+    # ASan records the source argument in its global-overflow diagnostic.
+    # Compile from S so that the installed diagnostic ELF has no TMPDIR path.
+    cd ${S}
     ${CC} ${CPPFLAGS} ${CFLAGS} -O1 -g -fno-inline -fno-lto ${LDFLAGS} \
-        -DIOTBENCH_BUFFER_FIXTURE_ENABLED=1 -std=c99 -Wall -Wextra -Werror ${S}/fixture-buffer-write.c \
+        -DIOTBENCH_BUFFER_FIXTURE_ENABLED=1 -std=c99 -Wall -Wextra -Werror fixture-buffer-write.c \
         -o ${B}/fixture-buffer-write
     if ${@bb.utils.contains('PACKAGECONFIG', 'asan', 'true', 'false', d)}; then
         ${CC} ${CPPFLAGS} ${CFLAGS} -O1 -g -fno-inline -fno-lto ${LDFLAGS} \
             -DIOTBENCH_BUFFER_FIXTURE_ENABLED=1 -std=c99 -Wall -Wextra -Werror \
             -fsanitize=address -fno-sanitize-recover=all -fno-omit-frame-pointer \
-            ${S}/fixture-buffer-write.c -o ${B}/fixture-buffer-write-asan
+            fixture-buffer-write.c -o ${B}/fixture-buffer-write-asan
     fi
 }
 

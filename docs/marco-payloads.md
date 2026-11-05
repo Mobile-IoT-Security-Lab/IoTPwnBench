@@ -77,7 +77,7 @@ For CLI tests, run `echo "exit=$?"` **immediately after** the command you want t
 | [Test 7: REST internal files](#test-7) | `cwe022-rest-internal-files` | Guest / isolated host | Config route returns the restricted synthetic marker; control denies it |
 | [Test 8: Apache applications](#test-8) | `cwe<CWE>-apache-web` | Guest / isolated host | Selected defect produces its marker or unauthorized state change |
 | [Test 9: C path and filename](#test-9) | `cwe022-native-path-traversal`, `cwe020-native-filename-validation` | Guest / isolated namespace | Disallowed synthetic file is read; outer containment or a nonmatching filename is rejected |
-| [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the out-of-bounds write; corrected control rejects the input |
+| [Test 10: C buffer overflow](#test-10) | `cwe787-native-buffer-overflow` | Host / guest with ASan | ASan identifies the first out-of-bounds write from a valid 65-byte frame |
 | [Test 11: C connection string](#test-11) | `cwe020-native-connection-string` | Guest / host | Injected field changes SQLite from read-only to writable capability |
 | [Test 12: C symbolic links](#test-12) | `cwe061-native-symlink-following` | Guest / isolated host | Fixed file follows the synthetic symlink; corrected control denies it |
 | [Test 13: Java commands](#test-13) | `cwe078-java-os-command-injection`, `cwe077-java-app-command-injection` | Guest / isolated host | Selected interpreter creates its extra synthetic marker |
@@ -1323,3 +1323,631 @@ recipes provide the corresponding fixture for the other device categories.
 > not deploy these inputs or configurations outside this benchmark.
 
 Source: [native-path-fixture](../meta-iotbench/recipes-vulns/native-path-fixture/).
+
+<a id="native-c-buffer-overflow-cwe-787-cwe-20-cwe-119"></a>
+<a id="test-10"></a>
+
+## Test 10: Vulnerable C binaries — buffer overflow — CWE-787/CWE-20/CWE-119
+
+### Build, boot and manual testing
+
+**What this tests.** The actual native AArch64 fixture accepts an exact binary
+stdin frame: a two-byte big-endian length followed by printable bytes. It
+validates the transport length only (maximum 256), then copies that many bytes
+into a 64-byte global configuration array. This manual procedure uses the
+ASan companion from the built firmware so the first out-of-bounds write is
+observable without relying on undefined behavior from the normal ELF.
+
+**Build — host:**
+
+Run this from the repository root. `IOTBENCH_NATIVE_BUFFER_ASAN=1` installs
+the diagnostic companion used below; the selected image enables its own fixture
+mode and opt-in only.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe787-native-buffer-overflow
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+docker compose run --rm \
+  -e FIRMWARE="$TEST_FIRMWARE" \
+  -e IOTBENCH_BUILD_MODE=fixture \
+  -e IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1 \
+  -e IOTBENCH_NATIVE_BUFFER_ASAN=1 yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This serial-only fixture starts QEMU without a network device. Log in with
+`root` / `routeradmin`; run the remaining commands in that guest console.
+
+**64-byte baseline — guest:**
+
+```sh
+{ printf '\000\100'; printf '%064d' 0; } | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  env ASAN_OPTIONS='detect_leaks=0:halt_on_error=1:abort_on_error=0:symbolize=1:exitcode=86' \
+  /usr/bin/fixture-buffer-write-asan
+echo "baseline_exit=$?"
+```
+
+Expected: the fixture warning, then `OK 64 3072` and `baseline_exit=0`.
+`\000\100` is the big-endian length `64`; `printf '%064d' 0` supplies exactly
+64 printable `0` bytes. This is the safe boundary of the actual destination.
+
+**65-byte witness — guest:**
+
+```sh
+{ printf '\000\101'; printf '%065d' 0; } | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  env ASAN_OPTIONS='detect_leaks=0:halt_on_error=1:abort_on_error=0:symbolize=1:exitcode=86' \
+  /usr/bin/fixture-buffer-write-asan 2>/tmp/iotbench-cwe787-asan.log
+echo "witness_exit=$?"
+grep -E 'global-buffer-overflow|WRITE of size 1|fixture-buffer-write.c:51' \
+  /tmp/iotbench-cwe787-asan.log
+```
+
+Expected: no normal `OK` line, `witness_exit=86`, and all three ASan witnesses:
+`global-buffer-overflow`, `WRITE of size 1`, and
+`fixture-buffer-write.c:51`. `\000\101` declares 65 printable `0` bytes: the
+parser accepts the frame, while the 65th indexed store is the first write past
+the 64-byte global array. Repeat this same 65-byte block once; it must again
+exit `86` and report the same ASan class, write size, and source line.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe787-native-buffer-overflow` image recipe. It retains device
+metadata but installs only `cwe787-native-buffer-overflow`, with no device
+daemon or network listener. The installed normal and ASan binaries are both
+compiled from `fixture-buffer-write.c`; the latter only makes the same
+`configuration[index] = payload[index]` store observable. The one missing
+check is `length <= sizeof(configuration)`: CWE-787 is the primary label,
+CWE-20 is the contributing validation failure, and CWE-119 is the broader
+category.
+
+**✅ Runtime evidence.** The `router`/`qemuarm64` ASan-enabled image was built
+with the normal Compose workflow and its exported root filesystem contained
+both `/usr/bin/fixture-buffer-write` and
+`/usr/bin/fixture-buffer-write-asan`, root-owned and mode `0755`. In QEMU, the
+64-byte frame returned `OK 64 3072` with exit `0`; the 65-byte frame returned
+exit `86` and ASan reported a global-buffer-overflow, one-byte write, and
+`fixture-buffer-write.c:51` on two consecutive manual runs. This evidence is
+limited to that built router/QEMU variant; the same shared package and image
+pattern provide the fixture for the other device categories.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The input is a local synthetic configuration frame; it starts no service,
+> enables no networking, and is not an exploitation procedure. Do not deploy
+> this configuration or reuse it outside the benchmark.
+
+Source: [cwe787-native-buffer-overflow](../meta-iotbench/recipes-vulns/cwe787-native-buffer-overflow/).
+
+<a id="native-connection-string-injection-cwe-20"></a>
+<a id="test-11"></a>
+
+## Test 11: Vulnerable C binaries — Connection String Injection — CWE-20
+
+### Build, boot and manual testing
+
+**What this tests.** The actual native C binary builds a SQLite `file:` URI
+from a caller-controlled `cache` field and an intended fixed `mode=ro` suffix.
+The input is a two-byte big-endian length followed by printable ASCII. The
+fixture creates a new private synthetic database for every invocation; no
+network service, existing database or external endpoint is involved.
+
+**Build — host:**
+
+Run from the repository root. The named scenario selects the fixture-only build
+mode and its connection-fixture opt-in automatically.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe020-native-connection-string
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This is a serial-only fixture: QEMU starts with no NIC. Log in with `root` /
+`routeradmin`, then run the remaining commands in the guest console.
+
+**Baseline — guest:**
+
+```sh
+printf '\000\007private' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "baseline_exit=$?"
+```
+
+Expected: the fixture notice, then
+`OK readonly=1 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`baseline_exit=0`. The normal `private` cache value leaves the intended
+read-only SQLite connection in effect.
+
+**Connection-string injection — guest:**
+
+```sh
+printf '\000\020private&mode=rw#' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "injected_exit=$?"
+```
+
+Expected: the same synthetic marker but
+`OK readonly=0 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`injected_exit=0`. `\000\020` declares the 16-byte value
+`private&mode=rw#`; its `#` starts a URI fragment, so SQLite applies the
+attacker-controlled `mode=rw` and ignores the intended trailing `&mode=ro`.
+
+**Repeat control — guest:**
+
+```sh
+printf '\000\007private' | \
+  setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  /usr/bin/fixture-connection
+echo "repeat_baseline_exit=$?"
+```
+
+Expected: again `OK readonly=1 marker=SYNTHETIC_CONNECTION_RESOURCE` and
+`repeat_baseline_exit=0`. Each process creates and removes its own private
+database, so the result returns to the normal read-only state. Repeating the
+injected command above consistently returns `readonly=0`.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe020-native-connection-string` image recipe that installs only
+`cwe020-native-connection-string` plus its device metadata. The executable's
+data flow is `stdin` -> `read_cache()` -> `snprintf()` URI construction ->
+`sqlite3_open_v2()` -> `sqlite3_db_readonly()`. The sole intentional defect is
+missing exact validation/URI encoding of the `cache` field; the database path,
+SQL query and Unix VFS are fixed. The helper rejects root execution, runs with
+matching unprivileged IDs, enables `no_new_privs` and seccomp denial of socket,
+connect and exec syscalls.
+
+**✅ Runtime evidence.** On 2026-11-04, the `router`/`qemuarm64` image built and
+exported successfully with the normal Compose workflow. Its compressed ext4
+passed `zstd -t`; offline inspection found root-owned mode `0755`
+`/usr/bin/fixture-connection` and its installed source/ground truth. In the
+disposable serial-only QEMU guest, the manual baseline returned `readonly=1`,
+the concrete injected field returned `readonly=0`, the baseline reset to
+`readonly=1`, and a repeated injected field returned `readonly=0`; all four
+commands exited 0. Runtime evidence is limited to this built router/QEMU
+variant. The eleven recipe inclusions were inspected and share the same package
+and fixture configuration.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The input changes capability only for a newly created private SQLite database;
+> it starts no service, reaches no network and provides no persistence or
+> post-exploitation path. Do not deploy this configuration or reuse the input
+> outside this benchmark.
+
+Source: [cwe020-native-connection-string](../meta-iotbench/recipes-vulns/cwe020-native-connection-string/).
+
+<a id="native-c-symbolic-link-following-cwe-61-and-cwe-59"></a>
+<a id="test-12"></a>
+
+## Test 12: Vulnerable C binaries — symbolic-link following — CWE-61/CWE-59
+
+### Build, boot and manual testing
+
+**What this tests.** The actual target C handler reads the fixed
+`public.cfg` entry from a pinned `allowed/` directory. The existing
+`isolate-path` manual entry copies only the two fixed synthetic resources into
+a fresh unprivileged tmpfs namespace. Its concrete `ordinary` and `symlink`
+arguments select either the ordinary file or the pre-established
+`public.cfg -> ../sentinel.txt` entry before the C handler opens it. The
+one-shot terminal entry then calls the same `retrieve()` sink as the Unix
+socket service; it uses no Python client, network listener, or caller-selected
+filename.
+
+**Build — host:**
+
+Run from the repository root. Selecting this scenario enables its own
+fixture-only build configuration automatically.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe061-native-symlink-following
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+```
+
+**Boot — host:**
+
+```bash
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This is a serial-only fixture: QEMU starts with no NIC. Log in with `root` /
+`routeradmin`, then run the remaining commands in the guest console.
+
+**Ordinary-file baseline — guest:**
+
+```sh
+su -s /bin/sh iotsymlink -c '
+root=$(mktemp -d /tmp/iotbench-symlink.XXXXXX) || exit 1
+/usr/share/iotbench/native-symlink/bin/isolate-path --manual-request \
+  /usr/share/iotbench/native-symlink "$root" ordinary
+status=$?
+rmdir "$root"
+exit "$status"
+'
+echo "baseline_exit=$?"
+```
+
+Expected: `ENTRY ordinary public.cfg`, followed by `OK 39` and
+`SYNTHETIC_CWE61_ORDINARY_CONFIGURATION`, then `baseline_exit=0`. The ordinary
+entry is the allowed boundary condition.
+
+**Pre-established symbolic-link witness and repeat — guest:**
+
+```sh
+for label in witness repeat; do
+  su -s /bin/sh iotsymlink -c '
+root=$(mktemp -d /tmp/iotbench-symlink.XXXXXX) || exit 1
+/usr/share/iotbench/native-symlink/bin/isolate-path --manual-request \
+  /usr/share/iotbench/native-symlink "$root" symlink
+status=$?
+rmdir "$root"
+exit "$status"
+'
+  printf '%s_exit=%s\n' "$label" "$?"
+done
+```
+
+Expected on both iterations: `ENTRY symlink public.cfg -> ../sentinel.txt`,
+then `OK 30` and `SYNTHETIC_CWE61_SENTINEL_ONLY`, with exit `0`. The launcher
+creates the link before the target C process starts, while the process pins
+the parent directory. The vulnerable `openat()` lacks `O_NOFOLLOW`, so it
+follows only that fixed final-component link and reads the synthetic sentinel.
+Each invocation receives a new private tmpfs, so the repeated result confirms
+that no guest or host state is retained.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category has a thin
+`<device>-cwe061-native-symlink-following` image recipe that installs only
+`cwe061-native-symlink-following` plus device metadata. Its static-PIE target
+ELF remains executable after the existing launcher pivots into the minimal
+tmpfs. The only intentional defect is omission of `O_NOFOLLOW` on the fixed
+`public.cfg` final component; the corrected twin uses the same manual input
+but refuses the link with `ERR DENIED`. The test never accepts a path from the
+researcher and cannot reach files outside its disposable synthetic namespace.
+
+**✅ Runtime evidence.** On 2026-11-04, the normal Compose build and export of
+the `router`/`qemuarm64` vulnerable image succeeded. Its compressed ext4
+passed `zstd -t`; offline inspection found the root-owned mode-`0755` target
+ELF and fixture resources. In the disposable QEMU serial guest, the documented
+`ordinary` request returned `OK 39` and the ordinary marker; two independent
+`symlink` requests each returned `OK 30` and the sentinel with exit `0`. The
+same router fixed twin built and booted successfully: its ordinary request
+remained accepted, while its pre-established `symlink` request returned
+`ERR DENIED`. No Python runner or network interface was used. Runtime evidence
+is limited to these built router/QEMU images; the eleven thin recipes reuse the
+same package and explicit fixture configuration.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The link and both resources exist solely inside a fresh private tmpfs; no
+> network service, persistence, external file, or exploitation chain is
+> involved. Do not deploy this configuration or reuse its input outside this
+> benchmark.
+
+Source: [cwe061-native-symlink-following](../meta-iotbench/recipes-vulns/cwe061-native-symlink-following/).
+
+<a id="test-13"></a>
+
+## Test 13: Vulnerable Java JARs — command injection — CWE-78/CWE-77/CWE-20
+
+### Build, boot and manual testing
+
+**What this tests.** This fixture provides two deliberately narrow Java JARs.
+Both require the `--fixture-test` argument, the
+`IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1` opt-in, and a writable `/work`
+directory owned by the unprivileged `javacommand` user. Their shared
+intentional CWE-20 defect accepts any printable-ASCII `label` rather than the
+intended `[A-Za-z0-9_-]` form. The CWE-78 variant concatenates that label into
+a fixed `/bin/sh -c` command; the concrete witness below closes its quoted
+argument and writes the fixed synthetic `os-marker.txt` marker. The CWE-77
+variant sends the label to a tiny application command interpreter whose `;`
+separator permits the fixed `mark` command and its synthetic
+`app-marker.txt` file. Neither JAR starts a service or needs a network path.
+
+**Build and boot the OS-command variant — host:**
+
+Run from the repository root. Selecting this scenario enables only its own
+fixture configuration automatically.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe078-java-os-command-injection
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+QEMU is serial-only and starts with no NIC. Log in with `root` / `routeradmin`.
+In a fresh default QEMU snapshot, create the fixture's isolated working
+directory; the JAR itself will run as `javacommand`.
+
+```sh
+mkdir /work
+chown javacommand:javacommand /work
+chmod 0700 /work
+```
+
+**CWE-78 baseline — guest:**
+
+```sh
+su -s /bin/sh javacommand -c 'cd /work && rm -f normal.txt os-marker.txt && printf "label=sensor_01\n" | env IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1 java -Xmx32m -XX:-UsePerfData -jar /usr/share/iotbench/java-command-fixture/fixture-os-command.jar --fixture-test && printf "normal=" && cat normal.txt && test ! -e os-marker.txt && printf "marker=absent\n"'
+printf 'baseline_exit=%s\n' "$?"
+```
+
+Expected: `normal=sensor_01`, then `marker=absent` and `baseline_exit=0`.
+The input is within the intended label boundary and creates no marker.
+
+**CWE-78 witness — guest:**
+
+```sh
+su -s /bin/sh javacommand <<'EOF'
+set -eu
+cd /work
+rm -f normal.txt os-marker.txt
+printf "%s\n" "label=sensor' > normal.txt; printf 'JAVA_OS_MARKER\\n' > os-marker.txt; #" |
+  env IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1 \
+  java -Xmx32m -XX:-UsePerfData -jar \
+  /usr/share/iotbench/java-command-fixture/fixture-os-command.jar --fixture-test
+printf 'normal='
+cat normal.txt
+printf 'marker='
+cat os-marker.txt
+EOF
+printf 'witness_exit=%s\n' "$?"
+```
+
+Expected: `normal=sensor`, `marker=JAVA_OS_MARKER`, and `witness_exit=0`.
+The marker is produced by the JAR's intentionally concatenated shell command,
+in `/work` only. For the reproducibility control, paste the same witness block
+once more (it removes both files first): it must again print the same two
+values and exit `0`.
+
+**Build and boot the application-command variant — host:**
+
+Quit the first guest with `Ctrl-A`, then `x`; the default QEMU disk is a
+snapshot. Build and boot a fresh guest for the second JAR.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe077-java-app-command-injection
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+Log in with `root` / `routeradmin` and prepare its fresh `/work` directory:
+
+```sh
+mkdir /work
+chown javacommand:javacommand /work
+chmod 0700 /work
+```
+
+**CWE-77 baseline — guest:**
+
+```sh
+su -s /bin/sh javacommand -c 'cd /work && rm -f normal.txt app-marker.txt && printf "label=sensor_01\n" | env IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1 java -Xmx32m -XX:-UsePerfData -jar /usr/share/iotbench/java-command-fixture/fixture-app-command.jar --fixture-test && printf "normal=" && cat normal.txt && test ! -e app-marker.txt && printf "marker=absent\n"'
+printf 'baseline_exit=%s\n' "$?"
+```
+
+Expected: `normal=sensor_01`, `marker=absent`, and `baseline_exit=0`.
+
+**CWE-77 witness — guest:**
+
+```sh
+su -s /bin/sh javacommand <<'EOF'
+set -eu
+cd /work
+rm -f normal.txt app-marker.txt
+printf 'label=sensor;mark\n' |
+  env IOTBENCH_ENABLE_JAVA_COMMAND_FIXTURE=1 \
+  java -Xmx32m -XX:-UsePerfData -jar \
+  /usr/share/iotbench/java-command-fixture/fixture-app-command.jar --fixture-test
+printf 'normal='
+cat normal.txt
+printf 'marker='
+cat app-marker.txt
+EOF
+printf 'witness_exit=%s\n' "$?"
+```
+
+Expected: `normal=sensor`, `marker=JAVA_APP_MARKER`, and `witness_exit=0`.
+Here `mark` is an extra application-language statement, not an operating-system
+command. Paste the same witness block once more for the reproducibility
+control; it must produce the same output and exit `0` after its local cleanup.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Each supported device category — `doorlock`,
+`envsensor`, `healthmonitor`, `ipcamera`, `plc`, `router`, `smartbulb`,
+`smarthub`, `smartplug`, `smartspeaker`, and `thermostat` — has one thin
+`<device>-cwe078-java-os-command-injection` image and one thin
+`<device>-cwe077-java-app-command-injection` image. Each installs only the
+corresponding JAR fixture and device metadata. `FixtureRequest` enforces the
+explicit argument, environment, working-directory, length, and ASCII gates;
+its intentionally weak label grammar is the common input-validation defect.
+Only `FixtureOsCommand` invokes `/bin/sh`; `FixtureAppCommand` implements the
+separate application-command condition. The documented manual inputs write
+only fixed markers in the unprivileged `/work` directory; no other target is
+needed to observe either condition.
+
+**✅ Runtime evidence.** On 2026-11-04, the normal Compose workflow built and
+exported both `router`/`qemuarm64` images. Each compressed ext4 passed
+`zstd -t`; offline ext4 inspection found the corresponding root-owned,
+mode-`0644` JAR plus its source and ground-truth resources. In fresh
+serial-only QEMU guests, each documented baseline returned
+`normal=sensor_01` with no marker. Two independent CWE-78 witness executions
+returned `normal=sensor` and `JAVA_OS_MARKER`; two independent CWE-77 witness
+executions returned `normal=sensor` and `JAVA_APP_MARKER`; all runs exited
+`0`. No Python runner, automatic test harness, network interface, or external
+system was used. Runtime evidence is limited to the built router/QEMU images;
+the eleven image recipes per variant reuse the inspected fixture package and
+configuration.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The concrete inputs write fixed synthetic markers in the disposable guest's
+> `/work` directory; they start no service, access no network, provide no
+> persistence, and are not for use outside this benchmark.
+
+Source: [java-command-fixture](../meta-iotbench/recipes-vulns/java-command-fixture/).
+
+<a id="test-14"></a>
+
+## Test 14: Vulnerable Java JARs — deserialization — CWE-502/CWE-20
+
+### Build, boot and manual testing
+
+**What this tests.** The local JAR reads one Java serialization stream from
+standard input. `FixtureData` is the only intended request type, but the
+vulnerable image applies resource limits without a type allowlist before
+`ObjectInputStream.readObject()`. The concrete `FixtureMarker` stream below
+therefore runs its harmless `readObject()` callback, which increments only an
+in-memory counter, before the later `instanceof FixtureData` check returns
+`UNEXPECTED_TYPE`. The explicit `--show-events` option exposes that counter for
+this benchmark observation; it neither writes a file nor starts a service.
+
+**Build and boot — host:**
+
+Run from the repository root. The selected scenario enables only its own
+fixture build configuration.
+
+```bash
+TEST_DEVICE=router
+TEST_SCENARIO=cwe502-java-deserialization
+TEST_FIRMWARE="${TEST_DEVICE}-${TEST_SCENARIO}"
+
+FIRMWARE="$TEST_FIRMWARE" docker compose run --rm yocto
+FIRMWARE="$TEST_FIRMWARE" ./scripts/run-qemu.sh
+```
+
+This is a serial-only fixture: QEMU starts with no NIC or forwarded port. Log
+in with `root` / `routeradmin`, then run the remaining commands in the guest
+console. The two variables below are complete fixed Java serialization streams;
+`printf '%b'` interprets their concrete octal bytes and needs no Python,
+generator or test harness.
+
+```sh
+FIXTURE=/usr/share/iotbench/java-deserialization-fixture
+NORMAL_STREAM='\254\355\000\005\163\162\000\060\157\162\147\056\151\157\164\142\145\156\143\150\056\146\151\170\164\165\162\145\056\144\145\163\145\162\151\141\154\151\172\141\164\151\157\156\056\106\151\170\164\165\162\145\104\141\164\141\000\000\000\000\000\000\000\001\002\000\002\111\000\007\162\145\141\144\151\156\147\114\000\006\163\145\156\163\157\162\164\000\022\114\152\141\166\141\057\154\141\156\147\057\123\164\162\151\156\147\073\170\160\000\000\000\027\164\000\011\163\145\156\163\157\162\137\060\061'
+MARKER_STREAM='\254\355\000\005\163\162\000\062\157\162\147\056\151\157\164\142\145\156\143\150\056\146\151\170\164\165\162\145\056\144\145\163\145\162\151\141\154\151\172\141\164\151\157\156\056\106\151\170\164\165\162\145\115\141\162\153\145\162\000\000\000\000\000\000\000\001\002\000\000\170\160'
+```
+
+**Baseline — guest:**
+
+```sh
+printf '%b' "$NORMAL_STREAM" | \
+  setpriv --reuid=992 --regid=992 --clear-groups \
+  env IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE=1 \
+  java -Xmx32m -XX:-UsePerfData -jar "$FIXTURE/fixture-deserialization.jar" \
+  --fixture-test --show-events
+printf 'baseline_exit=%s\n' "$?"
+```
+
+Expected: `OK sensor=sensor_01 reading=23`, `CALLBACK_EVENTS=0`, then
+`baseline_exit=0`. This valid `FixtureData` request reaches the same
+deserialization path but no marker callback.
+
+**Callback witness — guest:**
+
+```sh
+printf '%b' "$MARKER_STREAM" | \
+  setpriv --reuid=992 --regid=992 --clear-groups \
+  env IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE=1 \
+  java -Xmx32m -XX:-UsePerfData -jar "$FIXTURE/fixture-deserialization.jar" \
+  --fixture-test --show-events
+printf 'witness_exit=%s\n' "$?"
+```
+
+Expected: `UNEXPECTED_TYPE`, `CALLBACK_EVENTS=1`, then `witness_exit=2`.
+The nonzero application status is the intentional late rejection, not a failed
+test: the event count proves that the input class was reconstructed and its
+callback ran first. Paste this same block once more; it must again print
+`UNEXPECTED_TYPE`, `CALLBACK_EVENTS=1`, and `witness_exit=2`.
+
+**Corrected allowlist control (optional, host and guest):** quit QEMU with
+**Ctrl-A**, then **X**, build and boot the existing twin, log in again, and
+reuse the same `MARKER_STREAM` definition from above.
+
+```bash
+FIRMWARE=router-cwe502-java-deserialization-fixed docker compose run --rm yocto
+FIRMWARE=router-cwe502-java-deserialization-fixed ./scripts/run-qemu.sh
+```
+
+```sh
+FIXTURE=/usr/share/iotbench/java-deserialization-fixture
+MARKER_STREAM='\254\355\000\005\163\162\000\062\157\162\147\056\151\157\164\142\145\156\143\150\056\146\151\170\164\165\162\145\056\144\145\163\145\162\151\141\154\151\172\141\164\151\157\156\056\106\151\170\164\165\162\145\115\141\162\153\145\162\000\000\000\000\000\000\000\001\002\000\000\170\160'
+printf '%b' "$MARKER_STREAM" | \
+  setpriv --reuid=992 --regid=992 --clear-groups \
+  env IOTBENCH_ENABLE_JAVA_DESERIALIZATION_FIXTURE=1 \
+  java -Xmx32m -XX:-UsePerfData -jar "$FIXTURE/fixture-deserialization.jar" \
+  --fixture-test --show-events
+printf 'fixed_marker_exit=%s\n' "$?"
+```
+
+Expected: `FILTER_REJECTED`, `CALLBACK_EVENTS=0`, and
+`fixed_marker_exit=2`. The corrected twin's allowlist rejects
+`FixtureMarker` before its callback while keeping the normal `FixtureData`
+baseline valid.
+
+### Scenario and scope
+
+**⚙️ Implementation.** Every supported device category — `doorlock`,
+`envsensor`, `healthmonitor`, `ipcamera`, `plc`, `router`, `smartbulb`,
+`smarthub`, `smartplug`, `smartspeaker`, and `thermostat` — has one thin
+`<device>-cwe502-java-deserialization` image and an existing corrected twin.
+The shared image include installs only the Java fixture and core boot packages,
+copies device metadata, disables device daemons, and requires explicit fixture
+mode. The source-to-observation flow is fixed: stdin → bounded byte array →
+`ObjectInputStream.readObject()` → `FixtureMarker.readObject()` → late
+`instanceof` rejection → `CALLBACK_EVENTS`. Resource bounds remain in place
+(4096 bytes, depth 8, 32 references and array length 16); CWE-502 is the
+missing type restriction at the reconstruction boundary, with CWE-20 as the
+contributing input-validation error. The fixture establishes an unintended
+synthetic callback only, not arbitrary code execution.
+
+**✅ Runtime evidence.** On 2026-11-05, the normal Compose workflow built and
+exported all eleven vulnerable `qemuarm64` images, plus both `router` variants.
+Every vulnerable compressed ext4 artifact passed `zstd -t`; offline ext4
+inspection found the matching shared `FixtureDeserialize.java` source and the
+application JAR in each one. The two router artifacts additionally contained the
+root-owned mode-`0644` application and test JARs, sources and ground-truth
+resources. In fresh serial-only QEMU guests, the vulnerable JAR accepted the normal stream with
+`CALLBACK_EVENTS=0`; two independent marker-stream executions returned
+`UNEXPECTED_TYPE`, `CALLBACK_EVENTS=1`, and exit `2`. The corrected router twin
+accepted the normal stream but returned `FILTER_REJECTED`,
+`CALLBACK_EVENTS=0`, and exit `2` for the identical marker stream. No Python
+runner, automatic test harness, network interface or external system was used.
+Dynamic runtime evidence is limited to the built router/QEMU images; the artifact
+checks establish package inclusion across the eleven thin device recipes.
+
+> ⚠️ **Disclaimer:** Intentionally insecure, isolated benchmark fixture only.
+> The two byte streams are synthetic local Java objects; their only observable
+> side effect is an in-memory counter in the disposable guest. They provide no
+> persistence, remote access or exploitation chain and must not be reused
+> outside this benchmark.
+
+Source: [cwe502-java-deserialization](../meta-iotbench/recipes-vulns/cwe502-java-deserialization/).
