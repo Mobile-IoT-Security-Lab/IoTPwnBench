@@ -25,7 +25,7 @@ says otherwise, the default host endpoints are HTTP `127.0.0.1:8080`, MQTT
 
 This index covers all 34 `iotbench-*.bb` image recipes currently in the
 repository. Detailed router catalog payloads are kept in
-[francesco-payloads.md](francesco-payloads.md); all other procedures are in
+[payloads.md](payloads.md); all other procedures are in
 this document.
 
 | Firmware id | CWE | Attack surface | Detailed procedure |
@@ -41,19 +41,19 @@ this document.
 | `healthmonitor-cwe078-os-command-injection` | CWE-78 | MQTT export target | [MQTT devices](#mqtt-devices) |
 | `doorlock-cwe078-os-command-injection` | CWE-78 | MQTT firmware URL | [MQTT devices](#mqtt-devices) |
 | `plc-cwe078-os-command-injection` | CWE-78 | Modbus project loader | [PLC Modbus](#plc-modbus) |
-| `router-cwe276-leaked-private-key` | CWE-276 | Public HTTP file | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe276-bad-chown-rights` | CWE-276 | Local policy file | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe798-ld-preload-sudo` | CWE-798 | SSH and sudo | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe798-vi-privilege-escalation` | CWE-798 | SSH and privileged editor | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe078-writable-root-cron` | CWE-78 | Local cron input | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe287-ssh-hardcoded-backdoor` | CWE-287 | SSH | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe089-http-sqli-auth` | CWE-89 | HTTP login | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe078-bash-command-injection` | CWE-78 | HTTP dashboard diagnostic | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe077-c-command-injection` | CWE-77 | HTTP dashboard helper | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe416-use-after-free` | CWE-416 | HTTP dashboard helper | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe400-diagnostic-dos` | CWE-400 | HTTP dashboard diagnostic | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe078-service-interface-injection` | CWE-78 | TCP service port 9090 | [Router catalog payloads](francesco-payloads.md) |
-| `router-cwe022-path-traversal` | CWE-22 | Global Lighttpd fallback | [Router catalog payloads](francesco-payloads.md) |
+| `router-cwe276-leaked-private-key` | CWE-276 | Public HTTP file | [Router catalog payloads](payloads.md) |
+| `router-cwe276-bad-chown-rights` | CWE-276 | Local policy file | [Router catalog payloads](payloads.md) |
+| `router-cwe798-ld-preload-sudo` | CWE-798 | SSH and sudo | [Router catalog payloads](payloads.md) |
+| `router-cwe798-vi-privilege-escalation` | CWE-798 | SSH and privileged editor | [Router catalog payloads](payloads.md) |
+| `router-cwe078-writable-root-cron` | CWE-78 | Local cron input | [Router catalog payloads](payloads.md) |
+| `router-cwe287-ssh-hardcoded-backdoor` | CWE-287 | SSH | [Router catalog payloads](payloads.md) |
+| `router-cwe089-http-sqli-auth` | CWE-89 | HTTP login | [Router catalog payloads](payloads.md) |
+| `router-cwe078-bash-command-injection` | CWE-78 | HTTP dashboard diagnostic | [Router catalog payloads](payloads.md) |
+| `router-cwe077-c-command-injection` | CWE-77 | HTTP dashboard helper | [Router catalog payloads](payloads.md) |
+| `router-cwe416-use-after-free` | CWE-416 | HTTP dashboard helper | [Router catalog payloads](payloads.md) |
+| `router-cwe400-diagnostic-dos` | CWE-400 | HTTP dashboard diagnostic | [Router catalog payloads](payloads.md) |
+| `router-cwe078-service-interface-injection` | CWE-78 | TCP service port 9090 | [Router catalog payloads](payloads.md) |
+| `router-cwe022-path-traversal` | CWE-22 | Global Lighttpd fallback | [Router catalog payloads](payloads.md) |
 | `ipcamera-cwe022-recording-path-traversal` | CWE-22 | HTTP recording export | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
 | `smartplug-cwe862-missing-authorization` | CWE-862 | MQTT relay control | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |
 | `thermostat-cwe294-command-replay` | CWE-294 | MQTT RF-frame bridge | [Device-specific scenarios](#device-specific-cve-inspired-scenarios) |

@@ -21,7 +21,7 @@ non da un log di esecuzione automatica.
   stata ricostruita in questa sessione** dai sorgenti del repository, quindi la
   riproducibilità della build è stata esercitata.
 - Payload per-firmware, interfaccia e segnale di successo atteso: in
-  [../francesco-payloads.md](../francesco-payloads.md). Credenziali console/SSH:
+  [../payloads.md](../payloads.md). Credenziali console/SSH:
   `root` / `routeradmin`; backdoor e sudo: `iotbench`.
 
 ## Esiti osservati
@@ -58,7 +58,7 @@ Per lo scenario #13 (`router-cwe022-path-traversal`) il payload documentato
 usava quattro segmenti `..`, insufficienti a risalire da
 `/var/lib/router-dashboard/reports/` fino alla radice: con il prefisso
 `/missing/` servono **cinque** `%252e%252e`. Il firmware è corretto; è stato
-aggiornato il payload in [../francesco-payloads.md](../francesco-payloads.md).
+aggiornato il payload in [../payloads.md](../payloads.md).
 
 Per lo scenario #18 (`smarthub-cwe121-database-stack-overflow`) l'exploit
 restituiva HTTP 500 invece del segnale `STACK_OVERFLOW`: il modulo era compilato

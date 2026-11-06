@@ -112,7 +112,7 @@ current settings and performs this check before building the selected firmware.
 
 Docker compiles the firmware; host QEMU boots the exported image. Install the
 matching `qemu-system-*` executable and `zstd` on the host, then select a device
-and scenario using the [Marco guide](docs/marco-payloads.md#build-and-boot-any-device):
+and scenario using the [Marco guide](docs/payloads.md#build-and-boot-device-and-scenario-keyword):
 
 ```bash
 TEST_DEVICE=router
@@ -221,7 +221,7 @@ Additional router scenarios from the Francesco catalog slice:
 | `router-cwe022-path-traversal` | CWE-22 | Global Lighttpd fallback path traversal |
 
 Payloads and expected exploit signals for these scenarios are documented in
-[docs/francesco-payloads.md](docs/francesco-payloads.md).
+[docs/payloads.md](docs/payloads.md).
 That guide also identifies the canonical attacker position for each image:
 remote HTTP, remote network service, or a local `routerweb` foothold.
 
@@ -293,7 +293,7 @@ these fixtures must explicitly opt in with
 `IOTBENCH_ENABLE_CWE120_FIXTURE=1 ./scripts/build-all.sh`, or use
 `./scripts/build-all.sh --all`, which enables this and every other opt-in
 family for the firmware that needs it.
-See [docs/luca-payloads.md](docs/luca-payloads.md#buffer-overflow-esposto-tramite-service-interface)
+See [docs/payloads.md](docs/payloads.md#buffer-overflow-esposto-tramite-service-interface)
 for all device mappings, input flow, safeguards and expected sanitizer results.
 
 ### Weakly configured SSH: PermitEmptyPasswords (CWE-521)
@@ -325,7 +325,7 @@ python3 scripts/test-ssh-empty-passwords.py --url http://127.0.0.1:18080
 ```
 
 Build, manual dashboard steps, expected results and scope are in
-[Marco's Test 1](docs/marco-payloads.md#test-1).
+[Marco's Test 1](docs/payloads.md#test-1).
 
 ### Weakly configured Telnet: unencrypted traffic (CWE-798/287/276)
 
@@ -345,7 +345,7 @@ Production/default build configurations cannot resolve the fixture package.
 The catalog builder skips these images unless explicitly opted in. No Telnet
 port forwarding or boot enablement is added. The daemon binds only to loopback
 inside a private network namespace. Manual login, packet capture and expected results are in
-[docs/marco-payloads.md](docs/marco-payloads.md#weakly-configured-telnet--unencrypted-traffic-cwe-798287276).
+[docs/payloads.md](docs/payloads.md#weakly-configured-telnet--unencrypted-traffic-cwe-798287276).
 
 ### Bad SUDO Rights: allow changes to environment variables (catalog CWE-798)
 
@@ -367,7 +367,7 @@ traceability; this report-unit check does not demonstrate hardcoded credentials,
 arbitrary root execution or a change in actual disk allocation.
 
 Build, boot and direct manual commands are in
-[Marco's Test 4](docs/marco-payloads.md#test-4).
+[Marco's Test 4](docs/payloads.md#test-4).
 
 ### Cronjob wildcard injection (CWE-88/78/269)
 
@@ -379,7 +379,7 @@ FIRMWARE=router-cwe088-cronjob-wildcard-injection docker compose run --rm \
 ```
 
 The catalog skips these images by default, and production configurations cannot
-provide the fixture package. See [the cron wildcard fixture guide](docs/marco-payloads.md#cronjob-wildcard-injection-cwe-8878269)
+provide the fixture package. See [the cron wildcard fixture guide](docs/payloads.md#cronjob-wildcard-injection-cwe-8878269)
 for build guards, filename data flow, exact diagnostics and validation limits.
 
 ### Password Leak: file types and credential patterns (CWE-798)
@@ -397,7 +397,7 @@ FIRMWARE=router-cwe798-password-leak-conf-password docker compose run --rm \
 ```
 
 Default/production builds cannot provide these packages; the catalog skips the
-family unless explicitly enabled. See [Marco's Password Leak guide](docs/marco-payloads.md#password-leak--different-file-types-and-patterns-cwe-798)
+family unless explicitly enabled. See [Marco's Password Leak guide](docs/payloads.md#password-leak--different-file-types-and-patterns-cwe-798)
 for variants, inventory, exact finding manifests, native builds and validation
 limits.
 
@@ -410,7 +410,7 @@ package lives in `meta-iotbench/recipes-vulns/weak-cipher/` and installs the
 Each image retains its device's native services and simulated peripherals.
 The 3DES key, IV and HMAC key are hardcoded and identical in all eleven images;
 the same plaintext produces the same encrypted frame. Their public hex values
-are documented in [docs/luca-payloads.md](docs/luca-payloads.md).
+are documented in [docs/payloads.md](docs/payloads.md).
 
 | Firmware id | CWE | Scenario |
 | --- | --- | --- |
@@ -445,7 +445,7 @@ done
 
 The catalog-wide `scripts/build-all.sh` discovers these images automatically.
 Build artifacts are exported to `deploy-images/<firmware>/<machine>/`.
-See [docs/luca-payloads.md](docs/luca-payloads.md) for the frame format, API/CLI
+See [docs/payloads.md](docs/payloads.md) for the frame format, API/CLI
 examples and verification procedure.
 
 ### Allow anonymous login
@@ -495,7 +495,7 @@ done
 `scripts/build-all.sh` discovers these recipes automatically. QEMU forwards
 FTP control to `127.0.0.1:2121` (`QEMU_FTP_PORT` overrides it) and passive data
 to `127.0.0.1:30000-30009`. Use passive FTP; all forwarded ports bind to
-loopback. See [docs/luca-payloads.md](docs/luca-payloads.md#allow-anonymous-login)
+loopback. See [docs/payloads.md](docs/payloads.md#allow-anonymous-login)
 for configuration, payloads, expected results, verification and remediation.
 
 ### Hardcoded credentials
@@ -550,7 +550,7 @@ architecture-independent. Artifacts land in
 is `http://127.0.0.1:8080` (`QEMU_HTTP_PORT` overrides it). This scenario uses
 the web support account; the router's two existing CWE-798 sudo scenarios have
 their own SSH entry points. See
-[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials)
+[docs/payloads.md](docs/payloads.md#hardcoded-credentials)
 for credentials, extraction, API payloads, expected signals and verification.
 
 ### Hardcoded Credentials — Hardcoding User Passwords
@@ -627,7 +627,7 @@ Detection requires the installed account credential and its authentication
 consumer, rather than a password-looking string alone. The exact ground-truth
 label is **Hardcoded credentials — Hardcoding the user passwords**,
 **CWE-798 — Use of Hard-coded Credentials**. See
-[docs/luca-payloads.md](docs/luca-payloads.md#hardcoded-credentials--hardcoding-user-passwords)
+[docs/payloads.md](docs/payloads.md#hardcoded-credentials--hardcoding-user-passwords)
 for per-device files, build/test instructions and remediation.
 
 ### Bad SUDO Rights — Path Traversal
@@ -744,7 +744,7 @@ existing device profile and installs only `cwe022-bad-sudo-rights` as its
 vulnerability package. Exports go to
 `deploy-images/<device>-cwe022-bad-sudo-rights/<machine>/`; `YOCTO_MACHINE`
 selects the architecture and `scripts/build-all.sh` includes these fixtures.
-See [docs/luca-payloads.md](docs/luca-payloads.md#bad-sudo-rights--path-traversal)
+See [docs/payloads.md](docs/payloads.md#bad-sudo-rights--path-traversal)
 for per-device details and completed validation.
 
 ### Privilege Escalation Risk — Dangerous SUID Rights
@@ -918,7 +918,7 @@ All images reuse their normal device profile, install only
 `cwe250-dangerous-suid-rights` as the vulnerability package, and export to
 `deploy-images/<device>-cwe250-dangerous-suid-rights/<machine>/`.
 `YOCTO_MACHINE` selects the architecture; `scripts/build-all.sh` discovers
-these recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#privilege-escalation-risk--dangerous-suid-rights)
+these recipes. See [docs/payloads.md](docs/payloads.md#privilege-escalation-risk--dangerous-suid-rights)
 for every device's paths, metadata, build instructions and verification.
 
 ### CoAP Server Communicating with Vulnerable Internal Files
@@ -1000,7 +1000,7 @@ Replace `router` with any device in the table. The existing architecture
 selector, export paths and `scripts/build-all.sh` apply. Safe remediation is
 to remove internal-file resources from the public interface, or authenticate
 clients and authorize maintenance access before opening the files. See
-[docs/luca-payloads.md](docs/luca-payloads.md#coap-server-communicating-with-vulnerable-internal-files)
+[docs/payloads.md](docs/payloads.md#coap-server-communicating-with-vulnerable-internal-files)
 for the source-to-response data flow and per-device procedures.
 
 ### MQTT Server Communicating with Vulnerable Internal Files
@@ -1078,7 +1078,7 @@ docker compose run --rm yocto python3 /scripts/test-mqtt-internal-files.py \
 ~~~
 
 Build all eleven by iterating `iotbench-*-cwe862-mqtt-internal-files.bb` as
-shown in [docs/luca-payloads.md](docs/luca-payloads.md#mqtt-server-communicating-with-vulnerable-internal-files).
+shown in [docs/payloads.md](docs/payloads.md#mqtt-server-communicating-with-vulnerable-internal-files).
 The existing architecture selector, export paths and `scripts/build-all.sh`
 apply. Safe remediation removes the anonymous internal-topic grants or limits
 access to authenticated, authorized maintenance subscribers. The payload guide
@@ -1168,7 +1168,7 @@ done
 `deploy-images/<device>-cwe022-bash-path-traversal/<machine>/`. Each image
 installs only `cwe022-bash-path-traversal` as its vulnerability package.
 The exact ground-truth label is **Vulnerable Bash files — Path Traversal**.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-bash-files--path-traversal)
+See [docs/payloads.md](docs/payloads.md#vulnerable-bash-files--path-traversal)
 for filesystem mappings, per-device data flows, remediation and local tests.
 
 ### Vulnerable Java JARs — SQL Injection
@@ -1542,7 +1542,7 @@ Exports are under `deploy-images/<device>-cwe089-c-sql-injection/<machine>/`;
 only `cwe089-c-sql-injection` as its vulnerability package and retains the
 existing device profile and peripherals. SQLite is supplied by the pinned
 OpenEmbedded core layer; no additional layer or target SQLite CLI is needed.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--sql-injection)
+See [docs/payloads.md](docs/payloads.md#vulnerable-c-binaries--sql-injection)
 for per-device sources, schema, exact flow, offline tests and remediation.
 
 ### Vulnerable C Binaries — Null Pointer Dereference
@@ -1610,7 +1610,7 @@ All images retain their existing device profile and install only
 `cwe476-null-pointer-dereference` as the vulnerability package. Exports go to
 `deploy-images/<device>-cwe476-null-pointer-dereference/<machine>/`.
 `YOCTO_MACHINE` selects the architecture and `scripts/build-all.sh` discovers
-the recipes. See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--null-pointer-dereference)
+the recipes. See [docs/payloads.md](docs/payloads.md#vulnerable-c-binaries--null-pointer-dereference)
 for each device, exact source locations, remediation and validation results.
 
 ### Vulnerable C Binaries — Integer Overflow
@@ -1770,7 +1770,7 @@ retaining the existing device profile, native services and simulator.
 `YOCTO_MACHINE` selects the existing architecture; exports land under
 `deploy-images/<device>-cwe190-integer-overflow/<machine>/`.
 `scripts/build-all.sh` discovers all eleven recipes automatically.
-See [docs/luca-payloads.md](docs/luca-payloads.md#vulnerable-c-binaries--integer-overflow)
+See [docs/payloads.md](docs/payloads.md#vulnerable-c-binaries--integer-overflow)
 for per-device sources, exact flow, batch builds, offline ELF checks, remediation
 and completed verification results.
 
@@ -1813,7 +1813,7 @@ runs this family without networking. Production configuration skips the package;
 `scripts/build-all.sh` skips these images unless
 `IOTBENCH_ENABLE_NATIVE_BUFFER_FIXTURE=1` is set. Optional
 `IOTBENCH_NATIVE_BUFFER_ASAN=1` adds a target diagnostic ELF; the native
-Makefile also provides an `asan` target. See [Marco's payload notes](docs/marco-payloads.md#native-c-buffer-overflow-cwe-787-cwe-20-cwe-119)
+Makefile also provides an `asan` target. See [Marco's payload notes](docs/payloads.md#native-c-buffer-overflow-cwe-787-cwe-20-cwe-119)
 for framing, expected findings, build steps, and validation limits.
 
 ### Device taxonomy
@@ -1850,7 +1850,7 @@ real transfers; the manual procedure uses no test-runner script.
 
 Builds retain explicit fixture configuration. FTP is started manually in a private
 network namespace inside the guest. The standard daemon stays masked and no
-FTP ports are forwarded to the host. See [build, manual test and expected results](docs/marco-payloads.md#test-2).
+FTP ports are forwarded to the host. See [build, manual test and expected results](docs/payloads.md#test-2).
 
 | Firmware | CWE | Scenario |
 | --- | --- | --- |
@@ -2242,7 +2242,7 @@ FIRMWARE=router-cwe022-rest-internal-files docker compose run --rm \
   -e IOTBENCH_BUILD_MODE=fixture -e IOTBENCH_ENABLE_REST_FIXTURE=1 yocto
 ```
 
-See [the REST fixture procedure](docs/marco-payloads.md#exploitable-rest-interface--internal-files-cwe-22cwe-73)
+See [the REST fixture procedure](docs/payloads.md#exploitable-rest-interface--internal-files-cwe-22cwe-73)
 for endpoints, filesystem assets, build/runtime gates, sanitizer tests and
 validation limits. Native tests require Linux 5.6+ with `openat2`, local Unix
 socket permission, Python 3, a C compiler and `readelf`. They run offline.
@@ -2266,7 +2266,7 @@ FIRMWARE=router-cwe798-embedded-auth-c-source docker compose run --rm \
 Tests require Python 3, `cc`, `readelf` and permission to create Unix sockets;
 the optional filesystem round trip requires `mke2fs` and `debugfs`.
 Normal catalog builds skip the family. See the
-[embedded-auth fixture procedure](docs/marco-payloads.md#embedded-credential-pairs-over-a-unix-socket-cwe-798)
+[embedded-auth fixture procedure](docs/payloads.md#embedded-credential-pairs-over-a-unix-socket-cwe-798)
 for the credential inventory, build/guest tests, production exclusion checks,
 static-analysis ground truth and firmware validation limits.
 
@@ -2280,7 +2280,7 @@ Production builds skip these images. Tests run Apache without root in a
 private filesystem and loopback network namespace; QEMU starts them without
 a network device. Build commands, endpoint/data-flow tables, browser tests,
 reset procedures and limitations are in
-[docs/marco-payloads.md](docs/marco-payloads.md#apache-application-fixtures-ten-cwes-eleven-devices).
+[docs/payloads.md](docs/payloads.md#apache-application-fixtures-ten-cwes-eleven-devices).
 
 ### Opt-in native connection string fixture (CWE-20)
 
@@ -2292,7 +2292,7 @@ database. Builds require `IOTBENCH_BUILD_MODE=fixture` and
 `IOTBENCH_ENABLE_CONNECTION_FIXTURE=1`; the normal catalog skips this family.
 
 Run `/usr/bin/python3 scripts/test-native-connection-string.py --local` for
-the native regression. See the [implementation and build procedure](docs/marco-payloads.md#native-connection-string-injection-cwe-20)
+the native regression. See the [implementation and build procedure](docs/payloads.md#native-connection-string-injection-cwe-20)
 for data flow, parser controls, isolation, production exclusion, all device
 selectors and guest checks.
 
@@ -2309,7 +2309,7 @@ host mounts detached and no external network dependency.
 Builds require `IOTBENCH_BUILD_MODE=fixture` and
 `IOTBENCH_ENABLE_NATIVE_SYMLINK_FIXTURE=1`; the default catalog skips this family.
 Run `/usr/bin/python3 scripts/test-native-symlink-fixture.py --isolated-fixture`.
-See [fixture policy, resources, build instructions, and validation](docs/marco-payloads.md#native-c-symbolic-link-following-cwe-61-and-cwe-59).
+See [fixture policy, resources, build instructions, and validation](docs/payloads.md#native-c-symbolic-link-following-cwe-61-and-cwe-59).
 
 ## Corrected twins
 
