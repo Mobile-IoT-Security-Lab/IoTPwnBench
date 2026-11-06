@@ -28,17 +28,25 @@ def run_payload(guest, payload):
         if not getattr(guest, "logged_in", False):
             guest.login()
             guest.logged_in = True
+        # The sudo password lecture (shown once per session) contains several bare
+        # colons, so a loose "assword|~|:" match fires on the lecture text itself
+        # before the real "Password:" prompt and the password is never sent; the
+        # next thing typed (the id probe below) is then fed to sudo as a wrong
+        # password, which it rejects with "Sorry, try again.". Wait for the
+        # anchored "assword:" prompt instead, send the password exactly once, and
+        # branch on whether sudo grants the command (vi's "~" empty-buffer screen)
+        # or denies it ("Sorry, ... not allowed ...", expected on the fixed twin,
+        # whose sudoers rule authorizes a different command).
         _, setup_command, start_command, password, shell_pattern = payload
         guest.send(setup_command + "\n")
         out = [guest.expect(shell_pattern, 30)]
         guest.send(start_command + "\n")
-        for _ in range(3):
-            chunk = guest.expect(r"assword|~|:", 30)
-            out.append(chunk)
-            if re.search(r"assword", chunk):
-                guest.send(password + "\n")
-                continue
-            break
+        out.append(guest.expect(r"assword:", 30))
+        guest.send(password + "\n")
+        out.append(guest.expect(r"~|not allowed", 30))
+        if "not allowed" in guest.log[-1]:
+            out.append(guest.expect(shell_pattern, 30))
+            return "\n".join(out)
         guest.send(":!id\r")
         out.append(guest.expect(r"uid=0\(root\)|\(END\)|:", 30))
         guest.send("\r:q!\r")
@@ -142,7 +150,10 @@ def main():
             firmware = rootfs.parent.parent.name
             key = f"{firmware}/{args.machine}"
             base = firmware.removesuffix("-fixed")
-            if (base in SCENARIOS or base.partition("-")[2] in SHARED) and (key not in results or results[key]["status"] in ("error", "no-spec")):
+            slug = base.partition("-")[2]
+            # The embedded-auth family has no guest spec, check() inspects its rootfs offline.
+            known = base in SCENARIOS or slug in SHARED or slug.startswith("cwe798-embedded-auth-")
+            if known and (key not in results or results[key]["status"] in ("error", "no-spec")):
                 found.append(firmware)
         return found
 

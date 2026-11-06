@@ -31,13 +31,15 @@ def prepare(root, artifact, sanitize):
         shutil.copyfile(str(path), str(target))
         target.chmod(0o755 if os.access(str(path), os.X_OK) else 0o644)
 
-    def binary(path, destination=None):
+    def binary(path, destination=None, static=False):
         key = (str(path), destination)
         if key in copied:
             return
         copied.add(key)
         if destination != 'already-copied':
             copy(path, destination)
+        if static:
+            return
         # Inputs are our compiled fixture and public system runtime binaries.
         # Do not point this runner at untrusted firmware from outside the lab.
         result = subprocess.run(['ldd', str(path)], stdout=subprocess.PIPE,
@@ -59,7 +61,7 @@ def prepare(root, artifact, sanitize):
     for extension in destination.rglob('*.so'):
         binary(Path('/') / extension.relative_to(root))
     for name in ('fixture-path-cwe' + json.loads((artifact / 'variant.json').read_text())['cwe'],):
-        binary(artifact / 'bin' / name, 'already-copied')
+        binary(artifact / 'bin' / name, 'already-copied', static=True)
         if sanitize:
             binary(artifact / 'bin' / (name + '-asan'), 'already-copied')
 

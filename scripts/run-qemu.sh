@@ -87,6 +87,7 @@ case "${FIRMWARE_KIND}" in
     *-cwe020-native-connection-string) ;;
     *-cwe787-native-buffer-overflow) ;;
     *-cwe022-native-path-traversal|*-cwe020-native-filename-validation) ;;
+    *-cwe798-password-leak-*) ;;
     *-cwe???-apache-web) ;;
     *-cwe287-ssh-hardcoded-backdoor)
         SSH_PORT="${QEMU_SSH_PORT:-2222}"

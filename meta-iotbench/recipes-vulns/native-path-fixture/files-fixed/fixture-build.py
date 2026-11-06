@@ -67,7 +67,8 @@ def stage(output, cwe, mode='production', enable='0', machine='qemuarm64',
             if name.endswith('-asan'):
                 flags += ['-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                           '-fno-omit-frame-pointer', '-g']
-            subprocess.run(shlex.split(cc) + HARDEN + flags +
+            static_pie = ['-static-pie'] if name != 'isolate-path' and not name.endswith('-asan') else []
+            subprocess.run(shlex.split(cc) + HARDEN + flags + static_pie +
                            [str(source / ('isolate-path.c' if name == 'isolate-path' else 'fixture-path.c')),
                             '-o', str(path)], check=True)
     info = {'format': 1, 'mode': mode, 'enable': enable, 'cwe': cwe,

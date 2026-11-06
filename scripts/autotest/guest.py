@@ -21,7 +21,9 @@ ROOT_PASSWORD = "routeradmin"
 class Guest:
     def __init__(self, firmware, machine="qemuarm64", build_volume="yocto-build"):
         self.firmware, self.machine = firmware, machine
-        self.name = f"autotest-{firmware}-{os.getpid()}"[:60]
+        # The firmware id ends the name: truncating it would merge a vulnerable image and its "-fixed" twin
+        # when both are tested at the same time.
+        self.name = f"autotest-{os.getpid()}-{firmware}"
         self.lines = queue.Queue()
         self.log = []
         script = f"""

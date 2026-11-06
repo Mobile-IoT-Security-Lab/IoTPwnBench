@@ -67,11 +67,18 @@ on top of the shared Yocto cache, so it is fast once that cache is warm. The
 runner forwards, on `127.0.0.1`: the dashboard on `:8080`, SSH on `:2222`, the
 vulnerable TCP service on `:9090`, MQTT on `:1883`, Modbus on `:1502`, the ZCL
 bridge on `:17754`, the media parser on `:18000` and the patient-monitor
-protocol on `:2575`, for the images that need them. Stop the guest when done:
+protocol on `:2575`, for the images that need them. Stop the guest when done.
+This works in any terminal, whichever way the guest was started, because it
+does not depend on `TEST_FIRMWARE` (the per-scenario boot commands set only
+`FIRMWARE` for that one command):
 
 ```bash
-docker stop iotbench-qemu-"$TEST_FIRMWARE"-qemuarm64
+docker ps -q --filter name=iotbench-qemu | xargs -r docker stop
 ```
+
+To stop one guest by name, use the container name printed by
+`docker ps --format '{{.Names}}'`. It is `iotbench-qemu-<firmware id>-qemuarm64`,
+for example `iotbench-qemu-router-cwe276-leaked-private-key-qemuarm64`.
 
 ### Manual test index
 

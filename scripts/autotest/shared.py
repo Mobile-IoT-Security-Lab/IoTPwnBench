@@ -44,12 +44,10 @@ SHARED = {
         "out=$(mosquitto_sub -h 127.0.0.1 -t device/config -C 1 -W 10 2>/dev/null); [ -n \"$out\" ] && echo LEAKED", r"LEAKED"),
     "cwe476-null-pointer-dereference": selftest(),
     "cwe190-integer-overflow": selftest(),
-    "cwe787-native-buffer-overflow": selftest(),
     "cwe089-c-sql-injection": selftest(),
     "cwe089-java-sql-injection": selftest(),
     "cwe022-bad-sudo-rights": selftest(),
     "cwe022-bash-path-traversal": selftest(),
-    "cwe020-native-connection-string": selftest(),
 }
 
 # Root is deliberately locked on the embedded-auth family (see
@@ -83,20 +81,85 @@ def selftest_command(command_template, signal=r"EXIT=0"):
 
 
 
-def _service_buffer_overflow(device):
-    # The ASAN binary needs more than the 5 CPU seconds the shipped test allows on the emulated guest,
-    # and test-guest.sh has its directory hardcoded, so run a patched copy of both.
-    prepare = ("rm -rf /tmp/sbo; cp -r /usr/share/iotbench/service-buffer-overflow /tmp/sbo 2>/dev/null && "
-               "sed -i 's/RLIMIT_CPU, (5, 5)/RLIMIT_CPU, (600, 600)/' /tmp/sbo/test-service.py && "
-               "sed 's#^data=.*#data=/tmp/sbo#; s/RuntimeMaxSec=60/RuntimeMaxSec=1800/' /usr/share/iotbench/service-buffer-overflow/test-guest.sh "
-               "> /tmp/sbo/test-guest.sh")
-    run = (f"[ -e /tmp/sbo/test-guest.sh ] || echo SELFTEST_NONE; "
-           f"[ -e /tmp/sbo/test-guest.sh ] && {{ sh /tmp/sbo/test-guest.sh {device} >/tmp/st.out 2>&1; "
-           "echo EXIT=$?; tail -c 2000 /tmp/st.out; }")
-    return ("selftest", guest_steps(prepare, run, timeout=900), r"EXIT=0", None, None)
+_UNPRIV = "setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs"
 
 
-SHARED["cwe120-service-buffer-overflow"] = _service_buffer_overflow
+def _paired(attack, signal, normal, normal_signal, python=False):
+    """The attack must show its signal on the vulnerable image only, the normal request on both."""
+    make = guest_python if python else guest_steps
+    return lambda device: ("host", make(attack), signal, make(normal), normal_signal)
+
+
+# CWE-787: 65 bytes into a 64-byte configuration. The ordinary build accepts them (the ASan build is only
+# optional and absent from the images), the twin refuses them.
+SHARED["cwe787-native-buffer-overflow"] = _paired(
+    "{ printf '\\000\\101'; printf '%065d' 0; } | " + _UNPRIV + " /usr/bin/fixture-buffer-write 2>&1; echo END",
+    r"OK 65 ",
+    "{ printf '\\000\\100'; printf '%064d' 0; } | " + _UNPRIV + " /usr/bin/fixture-buffer-write 2>&1; echo END",
+    r"OK 64 3072")
+
+# CWE-20: the injected "&mode=rw#" turns the read-only connection into a writable one, the twin rejects the field.
+SHARED["cwe020-native-connection-string"] = _paired(
+    "printf '\\000\\020private&mode=rw#' | " + _UNPRIV + " /usr/bin/fixture-connection 2>&1; echo END",
+    r"OK readonly=0",
+    "printf '\\000\\007private' | " + _UNPRIV + " /usr/bin/fixture-connection 2>&1; echo END",
+    r"OK readonly=1")
+
+# CWE-120: a 32-byte label overruns the 32-byte stack buffer of the label service, seen through its ASan build.
+_LABEL_SERVICE = """
+import os, resource, socket, struct, subprocess, tempfile, time
+BIN = "/usr/share/iotbench/service-buffer-overflow/fixture-label-service-asan"
+
+
+def case(field):
+    folder = tempfile.mkdtemp(prefix="l-")
+    os.chmod(folder, 0o777)
+    endpoint = folder + "/s.sock"
+    env = dict(os.environ, IOTBENCH_CWE120_FIXTURE="1",
+               ASAN_OPTIONS="detect_leaks=0:abort_on_error=0:halt_on_error=1:symbolize=0:disable_coredump=1")
+
+    def drop():
+        resource.setrlimit(resource.RLIMIT_CPU, (600, 600))
+        os.setgroups([])
+        os.setgid(65534)
+        os.setuid(65534)
+    errors = tempfile.TemporaryFile()
+    process = subprocess.Popen([BIN, "--fixture-test", "--socket", endpoint], stdout=subprocess.DEVNULL,
+                               stderr=errors, env=env, preexec_fn=drop)
+    deadline = time.monotonic() + 120
+    while not os.path.exists(endpoint) and process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    response = b""
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(120)
+        client.connect(endpoint)
+        client.recv(1)
+        client.sendall(struct.pack("!H", len(field)) + field)
+        client.shutdown(socket.SHUT_WR)
+        while True:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+    except OSError:
+        pass
+    status = process.wait(timeout=120)
+    errors.seek(0)
+    return status, response, errors.read().decode(errors="replace")
+
+"""
+_LABEL_ATTACK = _LABEL_SERVICE + """
+status, response, text = case(b"S" * 32)
+print("ASAN_STACK_OVERFLOW" if "AddressSanitizer: stack-buffer-overflow" in text else "NO_ASAN_REPORT", status)
+"""
+_LABEL_NORMAL = _LABEL_SERVICE + """
+status, response, text = case(b"SYNTHETIC_DEVICE_NAME")
+print("LABEL_UPDATED" if response == b"SYNTHETIC_LABEL_UPDATED\\n" and status == 0 else "LABEL_FAILED", status)
+"""
+SHARED["cwe120-service-buffer-overflow"] = _paired(
+    _LABEL_ATTACK, r"ASAN_STACK_OVERFLOW", _LABEL_NORMAL, r"LABEL_UPDATED", python=True)
+
 def _unpriv_runner(path):
     script = ("import os, subprocess, sys\n"
              "os.setgroups([])\n"
