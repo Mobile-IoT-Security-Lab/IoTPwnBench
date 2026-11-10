@@ -1,4 +1,4 @@
-# IoTBench
+# IoTPwnBench
 
 A benchmark of deliberately vulnerable Yocto firmwares for `qemuarm64`. Each
 firmware is a **device profile** (a skeleton IoT app with simulated peripherals)
