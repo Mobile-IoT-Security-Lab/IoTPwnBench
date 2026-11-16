@@ -16,6 +16,22 @@ management, and a live **Sensors** panel fed by the peripheral simulator. Action
 in the UI do not change the Linux network; demo state is stored in
 `/var/lib/router-dashboard/settings.json`.
 
+## Pubblication
+
+More details about this work can be found in the paper [IoTPwnBench: A Synthetic Benchmark for IoT Firmware Security Analysis](https://arxiv.org/abs/2611.15316):
+
+```
+@misc{ferrari2026iotpwnbenchsyntheticbenchmarkiot,
+      title={IoTPwnBench: A Synthetic Benchmark for IoT Firmware Security Analysis}, 
+      author={Luca Ferrari and Marco Alecci and Luca Verderame and Jacques Klein and Francesco Pagano},
+      year={2026},
+      eprint={2611.15316},
+      archivePrefix={arXiv},
+      primaryClass={cs.CR},
+      url={https://arxiv.org/abs/2611.15316}, 
+}
+```
+
 ## Layout
 
 ```text
