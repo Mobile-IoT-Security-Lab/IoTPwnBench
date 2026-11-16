@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use IoTPwnBench in your research, please cite the following paper."
+title: "IoTPwnBench"
+abstract: >-
+  A reproducible benchmark of synthetic, deliberately vulnerable IoT firmware
+  images for security analysis and evaluation.
+authors:
+  - family-names: Ferrari
+    given-names: Luca
+  - family-names: Alecci
+    given-names: Marco
+  - family-names: Verderame
+    given-names: Luca
+  - family-names: Klein
+    given-names: Jacques
+  - family-names: Pagano
+    given-names: Francesco
+repository-code: "https://github.com/Mobile-IoT-Security-Lab/IoTPwnBench"
+url: "https://arxiv.org/abs/2611.15316"
+keywords:
+  - IoT security
+  - firmware security
+  - security benchmark
+  - vulnerability analysis
+  - Yocto
+  - QEMU
+preferred-citation:
+  type: article
+  title: "IoTPwnBench: A Synthetic Benchmark for IoT Firmware Security Analysis"
+  authors:
+    - family-names: Ferrari
+      given-names: Luca
+    - family-names: Alecci
+      given-names: Marco
+    - family-names: Verderame
+      given-names: Luca
+    - family-names: Klein
+      given-names: Jacques
+    - family-names: Pagano
+      given-names: Francesco
+  year: 2026
+  journal: "arXiv preprint arXiv:2611.15316"
+  url: "https://arxiv.org/abs/2611.15316"
